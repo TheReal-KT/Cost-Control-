@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/app_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/app_background"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:background="@color/surface"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="20dp">
+
+        <TextView
+            android:id="@+id/back_button"
+            style="@style/BackButton"
+            android:layout_width="40dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/go_back"
+            android:text="‹" />
+
+        <TextView
+            android:id="@+id/screen_title"
+            style="@style/ScreenTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/dashboard" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/screen_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:background="@color/surface"
+        android:elevation="8dp"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/nav_dashboard"
+            style="@style/NavigationItem"
+            android:text="@string/dashboard" />
+
+        <TextView
+            android:id="@+id/nav_subscriptions"
+            style="@style/NavigationItem"
+            android:text="@string/subscriptions" />
+
+        <TextView
+            android:id="@+id/nav_reminders"
+            style="@style/NavigationItem"
+            android:text="@string/reminders" />
+
+        <TextView
+            android:id="@+id/nav_recommendations"
+            style="@style/NavigationItem"
+            android:text="@string/recommendations_short"
+            android:contentDescription="@string/recommendations" />
+
+        <TextView
+            android:id="@+id/nav_profile"
+            style="@style/NavigationItem"
+            android:text="@string/profile" />
+    </LinearLayout>
+</LinearLayout>

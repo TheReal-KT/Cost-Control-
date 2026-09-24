@@ -1,3 +1,30 @@
 <resources>
     <string name="app_name">Agent Cost Control</string>
+    <string name="go_back">Go back</string>
+    <string name="loading">Loading</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="subscriptions">Subscriptions</string>
+    <string name="reminders">Reminders</string>
+    <string name="recommendations">Recommendations</string>
+    <string name="recommendations_short">Insights</string>
+    <string name="profile">Profile</string>
+    <string name="profile_settings">Profile &amp; Settings</string>
+    <string name="dashboard_heading">Your subscriptions at a glance</string>
+    <string name="dashboard_intro">Track recurring costs and upcoming renewals in one place.</string>
+    <string name="subscriptions_intro">View and manage the services you pay for.</string>
+    <string name="reminders_intro">Stay ahead of renewal dates and decisions.</string>
+    <string name="recommendations_intro">Review clear suggestions before deciding what to do.</string>
+    <string name="profile_intro">Your account and app preferences will appear here.</string>
+    <string name="summary_spend">Monthly spend\n—</string>
+    <string name="summary_active">Active services\n—</string>
+    <string name="dashboard_empty_title">Your overview is ready</string>
+    <string name="dashboard_empty_message">Subscription totals and renewals will appear when data is connected.</string>
+    <string name="subscriptions_empty_title">No subscriptions yet</string>
+    <string name="subscriptions_empty_message">Your subscriptions will appear here when this feature is connected.</string>
+    <string name="reminders_empty_title">No reminders yet</string>
+    <string name="reminders_empty_message">Upcoming renewal reminders will appear here.</string>
+    <string name="recommendations_empty_title">No recommendations yet</string>
+    <string name="recommendations_empty_message">Suggestions will appear after your subscriptions can be analysed.</string>
+    <string name="profile_empty_title">Account setup is coming</string>
+    <string name="profile_empty_message">Sign-in and account settings will be connected in a later task.</string>
 </resources>
