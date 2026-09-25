@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/app_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -9,26 +10,39 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="68dp"
         android:background="@color/surface"
         android:gravity="center_vertical"
-        android:paddingStart="12dp"
-        android:paddingEnd="20dp">
+        android:paddingStart="20dp"
+        android:paddingEnd="24dp">
 
         <TextView
+            android:id="@+id/brand_mark"
+            style="@style/BrandMark"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/brand_mark_background"
+            android:contentDescription="@string/app_name"
+            android:text="C" />
+
+        <ImageButton
             android:id="@+id/back_button"
-            style="@style/BackButton"
             android:layout_width="40dp"
             android:layout_height="48dp"
+            android:layout_marginEnd="12dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/go_back"
-            android:text="‹" />
+            android:src="@drawable/ic_arrow_back"
+            android:tint="@color/text_primary"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/screen_title"
             style="@style/ScreenTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/dashboard" />
+            android:text="@string/app_name" />
     </LinearLayout>
 
     <FrameLayout
@@ -37,39 +51,17 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <LinearLayout
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_navigation"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="wrap_content"
         android:background="@color/surface"
-        android:elevation="8dp"
-        android:orientation="horizontal"
-        android:paddingStart="4dp"
-        android:paddingEnd="4dp">
-
-        <TextView
-            android:id="@+id/nav_dashboard"
-            style="@style/NavigationItem"
-            android:text="@string/dashboard" />
-
-        <TextView
-            android:id="@+id/nav_subscriptions"
-            style="@style/NavigationItem"
-            android:text="@string/subscriptions" />
-
-        <TextView
-            android:id="@+id/nav_reminders"
-            style="@style/NavigationItem"
-            android:text="@string/reminders" />
-
-        <TextView
-            android:id="@+id/nav_recommendations"
-            style="@style/NavigationItem"
-            android:text="@string/recommendations_short"
-            android:contentDescription="@string/recommendations" />
-
-        <TextView
-            android:id="@+id/nav_profile"
-            style="@style/NavigationItem"
-            android:text="@string/profile" />
-    </LinearLayout>
+        android:elevation="10dp"
+        android:minHeight="72dp"
+        app:itemHorizontalTranslationEnabled="false"
+        app:itemIconSize="24dp"
+        app:itemIconTint="@color/nav_item_text"
+        app:itemTextColor="@color/nav_item_text"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/main_navigation" />
 </LinearLayout>

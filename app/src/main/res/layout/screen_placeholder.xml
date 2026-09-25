@@ -8,20 +8,30 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:paddingStart="24dp"
+        android:paddingTop="28dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            style="@style/Eyebrow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/workspace_eyebrow" />
 
         <TextView
             android:id="@+id/page_heading"
             style="@style/PageHeading"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" />
 
         <TextView
             android:id="@+id/page_intro"
             style="@style/PageIntro"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="10dp" />
 
         <include layout="@layout/view_content_state" />
     </LinearLayout>

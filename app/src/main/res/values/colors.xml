@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="app_background">#F5F7FA</color>
+    <color name="app_background">#F6F8FC</color>
     <color name="surface">#FFFFFF</color>
-    <color name="text_primary">#162A3A</color>
-    <color name="text_secondary">#607281</color>
-    <color name="nav_selected_background">#DCEDE9</color>
-    <color name="nav_selected_text">#126B60</color>
+    <color name="brand_blue">#155EEF</color>
+    <color name="brand_blue_soft">#EAF1FF</color>
+    <color name="brand_blue_on">#FFFFFF</color>
+    <color name="hero_supporting">#E2ECFF</color>
+    <color name="text_primary">#17243B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="card_outline">#E7ECF4</color>
+    <color name="nav_selected_text">#155EEF</color>
 </resources>

@@ -1,6 +1,5 @@
 package com.example.agentcostcontrol;
 
-import android.app.Activity;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -9,38 +8,46 @@ import android.view.ViewGroup;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 
 /** Hosts the five native screens. Data and authentication can be connected later. */
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
     private static final String STATE_CURRENT = "current_screen";
     private static final String STATE_HISTORY = "screen_history";
 
     private enum Screen {
-        DASHBOARD(R.id.nav_dashboard, R.string.dashboard, R.string.dashboard_intro,
+        DASHBOARD(R.id.nav_dashboard, R.drawable.ic_nav_home, R.string.dashboard, R.string.dashboard_intro,
                 R.string.dashboard_empty_title, R.string.dashboard_empty_message),
-        SUBSCRIPTIONS(R.id.nav_subscriptions, R.string.subscriptions,
+        SUBSCRIPTIONS(R.id.nav_subscriptions, R.drawable.ic_nav_services, R.string.subscriptions,
                 R.string.subscriptions_intro, R.string.subscriptions_empty_title,
                 R.string.subscriptions_empty_message),
-        REMINDERS(R.id.nav_reminders, R.string.reminders, R.string.reminders_intro,
+        REMINDERS(R.id.nav_reminders, R.drawable.ic_nav_reminders, R.string.reminders, R.string.reminders_intro,
                 R.string.reminders_empty_title, R.string.reminders_empty_message),
-        RECOMMENDATIONS(R.id.nav_recommendations, R.string.recommendations,
+        RECOMMENDATIONS(R.id.nav_recommendations, R.drawable.ic_nav_insights, R.string.recommendations,
                 R.string.recommendations_intro, R.string.recommendations_empty_title,
                 R.string.recommendations_empty_message),
-        PROFILE(R.id.nav_profile, R.string.profile_settings, R.string.profile_intro,
+        PROFILE(R.id.nav_profile, R.drawable.ic_nav_profile, R.string.profile_settings, R.string.profile_intro,
                 R.string.profile_empty_title, R.string.profile_empty_message);
 
         final int navId;
+        final int iconId;
         final int titleId;
         final int introId;
         final int emptyTitleId;
         final int emptyMessageId;
 
-        Screen(int navId, int titleId, int introId, int emptyTitleId, int emptyMessageId) {
+        Screen(int navId, int iconId, int titleId, int introId, int emptyTitleId, int emptyMessageId) {
             this.navId = navId;
+            this.iconId = iconId;
             this.titleId = titleId;
             this.introId = introId;
             this.emptyTitleId = emptyTitleId;
@@ -52,7 +59,9 @@ public class MainActivity extends Activity {
     private Screen currentScreen = Screen.DASHBOARD;
     private FrameLayout screenContainer;
     private TextView screenTitle;
-    private TextView backButton;
+    private TextView brandMark;
+    private ImageButton backButton;
+    private BottomNavigationView bottomNavigation;
     private OnBackInvokedCallback backCallback;
 
     @Override
@@ -62,12 +71,15 @@ public class MainActivity extends Activity {
 
         screenContainer = findViewById(R.id.screen_container);
         screenTitle = findViewById(R.id.screen_title);
+        brandMark = findViewById(R.id.brand_mark);
         backButton = findViewById(R.id.back_button);
         backButton.setOnClickListener(view -> navigateBack());
-
-        for (Screen screen : Screen.values()) {
-            findViewById(screen.navId).setOnClickListener(view -> navigateTo(screen));
-        }
+        bottomNavigation = findViewById(R.id.bottom_navigation);
+        bottomNavigation.setOnItemSelectedListener(item -> {
+            Screen destination = screenForNavId(item.getItemId());
+            navigateTo(destination);
+            return true;
+        });
 
         if (savedInstanceState != null) {
             String savedScreen = savedInstanceState.getString(STATE_CURRENT);
@@ -97,6 +109,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    private Screen screenForNavId(int navId) {
+        for (Screen screen : Screen.values()) {
+            if (screen.navId == navId) return screen;
+        }
+        return Screen.DASHBOARD;
+    }
+
     private void navigateTo(Screen destination) {
         if (destination == currentScreen) return;
         history.push(currentScreen);
@@ -114,13 +133,11 @@ public class MainActivity extends Activity {
     }
 
     private void renderScreen() {
-        screenTitle.setText(currentScreen.titleId);
-        backButton.setVisibility(history.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-        for (Screen screen : Screen.values()) {
-            View navItem = findViewById(screen.navId);
-            navItem.setActivated(screen == currentScreen);
-            navItem.setSelected(screen == currentScreen);
-        }
+        boolean atRoot = history.isEmpty();
+        screenTitle.setText(currentScreen == Screen.DASHBOARD ? R.string.app_name : currentScreen.titleId);
+        brandMark.setVisibility(atRoot ? View.VISIBLE : View.GONE);
+        backButton.setVisibility(atRoot ? View.GONE : View.VISIBLE);
+        bottomNavigation.getMenu().findItem(currentScreen.navId).setChecked(true);
 
         screenContainer.removeAllViews();
         int layoutId = currentScreen == Screen.DASHBOARD
@@ -141,6 +158,7 @@ public class MainActivity extends Activity {
         content.findViewById(R.id.empty_state).setVisibility(View.VISIBLE);
         ((TextView) content.findViewById(R.id.empty_title)).setText(currentScreen.emptyTitleId);
         ((TextView) content.findViewById(R.id.empty_message)).setText(currentScreen.emptyMessageId);
+        ((ImageView) content.findViewById(R.id.empty_icon)).setImageResource(currentScreen.iconId);
     }
 
     @Override
