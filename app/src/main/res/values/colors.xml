@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <color name="app_background">#F6F8FC</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="brand_blue">#155EEF</color>
+    <color name="brand_blue_soft">#EAF1FF</color>
+    <color name="brand_blue_on">#FFFFFF</color>
+    <color name="hero_supporting">#E2ECFF</color>
+    <color name="text_primary">#17243B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="card_outline">#E7ECF4</color>
+    <color name="nav_selected_text">#155EEF</color>
 </resources>
