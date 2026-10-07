@@ -114,8 +114,9 @@ public final class AiChatView extends LinearLayout {
                 });
             } catch (ChatClient.Failure error) {
                 int message = error.httpStatus == 429 ? R.string.chat_limited
-                        : error.httpStatus == 401 ? R.string.chat_session_expired : R.string.chat_failed;
-                fail(requestGeneration, message);
+                        : error.httpStatus == 401 ? R.string.chat_session_expired
+                        : error.httpStatus == 404 ? R.string.chat_conversation_expired : R.string.chat_failed;
+                fail(requestGeneration, message, error.httpStatus == 404);
             } catch (JSONException error) {
                 fail(requestGeneration, R.string.chat_invalid_response);
             } catch (IOException error) {
@@ -125,8 +126,13 @@ public final class AiChatView extends LinearLayout {
     }
 
     private void fail(int requestGeneration, int message) {
+        fail(requestGeneration, message, false);
+    }
+
+    private void fail(int requestGeneration, int message, boolean clearConversation) {
         post(() -> {
             if (disposed || requestGeneration != generation) return;
+            if (clearConversation) conversationId = null;
             showFeedback(message);
             idle();
         });

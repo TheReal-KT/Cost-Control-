@@ -1,17 +1,27 @@
 [project]
 name = "agentic-subscription-manager"
 version = "0.1.0"
-description = "Add your description here"
+description = "Authenticated, synthetic-only LangGraph AI service for Agent Cost Control"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "bcrypt>=5.0.0",
-    "fastapi>=0.141.1",
-    "psycopg[binary]>=3.3.6",
-    "python-dotenv>=1.2.4",
-    "sqlalchemy>=2.0.54",
-    "uvicorn>=0.53.0",
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "langgraph>=1.0,<2",
+    "pydantic>=2.10,<3",
+    "uvicorn>=0.34,<1",
 ]
+
+[dependency-groups]
+dev = ["ruff>=0.11,<1"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+include = ["src/**/*.py", "tests/**/*.py", "main.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
 [project.scripts]
 agentic-subscription-manager = "agentic_subscription_manager:main"

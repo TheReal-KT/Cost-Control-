@@ -1,6 +1,6 @@
 # AI tab and LangGraph integration proposal
 
-Date: 6 October 2026; implementation update 7 October. The native Android composer now has its model selector inside the prompt field, retained drafts, cancellation and bounded request/response JSON through an authenticated endpoint. The LangGraph backend, provider execution, streaming and grounded source links remain proposed work; see [the catch-up verification record](../catchup-2026-10-06.md).
+Date: 6 October 2026; implementation update 7 October. The native Android composer has its model selector inside the prompt field, retained drafts, cancellation and bounded request/response JSON. The Python `/ai/chat` endpoint and three LangGraph nodes are now implemented with verified Supabase identity, fictional fixtures, owner-bound correlation IDs and a bounded provider adapter. No service was deployed or live inference verified; streaming, real-account reads, durable history and source links remain proposed. See [ADR 0002](../adr/0002-python-langgraph-ai-boundary.md), [backend instructions](../../backend/README.md) and [verification](../ai-backend-verification-2026-10-07.md). The sections below describe the broader intended integration; current prototype behavior is explicitly narrower.
 
 ## Confirmed product decisions
 

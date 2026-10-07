@@ -12,6 +12,7 @@
     <string name="chat_failed">Couldn’t send. Try again.</string>
     <string name="chat_limited">Chat limit reached. Try later.</string>
     <string name="chat_session_expired">Your session expired. Sign in again.</string>
+    <string name="chat_conversation_expired">Chat expired. Send again.</string>
     <string name="chat_invalid_response">The assistant returned an invalid response.</string>
     <string name="chat_prompt_too_long">Keep your question under 4,000 characters.</string>
     <string name="chat_free_notice">Use sample data only with this free model.</string>
