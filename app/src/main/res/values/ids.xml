@@ -1,0 +1,11 @@
+<resources>
+    <item name="auth_email" type="id" />
+    <item name="auth_password" type="id" />
+    <item name="auth_first_name" type="id" />
+    <item name="auth_last_name" type="id" />
+    <item name="auth_primary_action" type="id" />
+    <item name="ai_chat_tab" type="id" />
+    <item name="ai_insights_tab" type="id" />
+    <item name="form_save_action" type="id" />
+    <item name="form_cancel_action" type="id" />
+</resources>

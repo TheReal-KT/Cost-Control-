@@ -4,45 +4,26 @@
     android:id="@+id/app_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/app_background"
-    android:fitsSystemWindows="true"
+    android:background="@color/surface"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="60dp"
         android:background="@color/surface"
         android:gravity="center_vertical"
         android:paddingStart="20dp"
-        android:paddingEnd="24dp">
-
-        <TextView
-            android:id="@+id/brand_mark"
-            style="@style/BrandMark"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:layout_marginEnd="12dp"
-            android:background="@drawable/brand_mark_background"
-            android:contentDescription="@string/app_name"
-            android:text="C" />
-
-        <ImageButton
-            android:id="@+id/back_button"
-            android:layout_width="40dp"
-            android:layout_height="48dp"
-            android:layout_marginEnd="12dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/go_back"
-            android:src="@drawable/ic_arrow_back"
-            android:tint="@color/text_primary"
-            android:visibility="gone" />
+        android:paddingEnd="20dp">
 
         <TextView
             android:id="@+id/screen_title"
             style="@style/ScreenTitle"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/app_name" />
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/home" />
     </LinearLayout>
 
     <FrameLayout
@@ -56,10 +37,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/surface"
-        android:elevation="10dp"
-        android:minHeight="72dp"
+        android:elevation="8dp"
+        android:minHeight="68dp"
         app:itemHorizontalTranslationEnabled="false"
-        app:itemIconSize="24dp"
+        app:itemIconSize="22dp"
         app:itemIconTint="@color/nav_item_text"
         app:itemTextColor="@color/nav_item_text"
         app:labelVisibilityMode="labeled"

@@ -1,5 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
+}
+
+val clientProperties = Properties().apply {
+    val configFile = rootProject.file("local.properties")
+    if (configFile.exists()) configFile.inputStream().use { load(it) }
+}
+fun clientConfig(name: String): String = providers.environmentVariable(name)
+    .orElse(clientProperties.getProperty(name, "")).get()
+fun javaString(value: String): String = "\"" + value.replace("\\", "\\\\")
+    .replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\""
+
+val publishableKey = clientConfig("SUPABASE_PUBLISHABLE_KEY").trim()
+require(publishableKey.isEmpty() || publishableKey.startsWith("sb_publishable_")) {
+    "SUPABASE_PUBLISHABLE_KEY must be a modern public client key; secret keys must never enter the APK."
 }
 
 android {
@@ -15,6 +31,10 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        buildConfigField("String", "SUPABASE_URL", javaString(clientConfig("SUPABASE_URL")))
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", javaString(publishableKey))
+        buildConfigField("String", "AI_ENDPOINT_URL", javaString(clientConfig("AI_ENDPOINT_URL")))
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -28,6 +48,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 
