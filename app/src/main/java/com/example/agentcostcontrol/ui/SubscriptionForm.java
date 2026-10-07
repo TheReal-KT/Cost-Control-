@@ -63,9 +63,6 @@ public final class SubscriptionForm extends LinearLayout {
 
         LocalDate start = original == null ? LocalDate.now() : original.getStartDate();
         LocalDate renewal = original == null ? start.plusMonths(1) : original.getRenewalDate();
-        addView(Ui.secondary(context, "Enter the amount and currency exactly as billed."),
-                margin(context, 0, 0, 0, 16));
-
         name = addTextField(context, "Service name", original == null ? "" : original.getName(),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         plan = addTextField(context, "Plan name (optional)", original == null ? "" : safe(original.getPlanName()),
@@ -89,7 +86,7 @@ public final class SubscriptionForm extends LinearLayout {
                 ? "Medium" : ServicesScreen.titleCase(original.getImportance().name()));
 
         autoRenew = new CheckBox(context);
-        autoRenew.setText("Service renews automatically");
+        autoRenew.setText("Auto-renew");
         autoRenew.setTextSize(14);
         autoRenew.setMinHeight(Ui.dp(context, 48));
         autoRenew.setChecked(original == null || original.isAutoRenew());

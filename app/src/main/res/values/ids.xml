@@ -4,6 +4,7 @@
     <item name="auth_first_name" type="id" />
     <item name="auth_last_name" type="id" />
     <item name="auth_primary_action" type="id" />
+    <item name="auth_switch_mode" type="id" />
     <item name="ai_chat_tab" type="id" />
     <item name="ai_insights_tab" type="id" />
     <item name="form_save_action" type="id" />

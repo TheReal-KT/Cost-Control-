@@ -28,11 +28,11 @@ import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.Espresso.pressBack;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.matcher.ViewMatchers.Visibility.GONE;
 import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
-import static androidx.test.espresso.matcher.ViewMatchers.withText;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 
@@ -70,10 +70,11 @@ public final class ChatAndAuthTest {
     @Test
     public void systemBackReturnsFromCreateAccountToSignIn() {
         try (ActivityScenario<MainActivity> ignored = ActivityScenario.launch(MainActivity.class)) {
-            onView(withText("Create an account")).perform(click());
+            onView(withId(R.id.auth_switch_mode)).perform(click());
             onView(withId(R.id.auth_first_name)).check(matches(isDisplayed()));
             pressBack();
-            onView(withText("Create an account")).check(matches(isDisplayed()));
+            onView(withId(R.id.auth_switch_mode)).check(matches(isDisplayed()));
+            onView(withId(R.id.auth_first_name)).check(doesNotExist());
             onView(withId(R.id.bottom_navigation)).check(matches(withEffectiveVisibility(GONE)));
         }
     }

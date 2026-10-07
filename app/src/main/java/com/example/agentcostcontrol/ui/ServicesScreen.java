@@ -105,7 +105,6 @@ public final class ServicesScreen {
         money.addView(Ui.secondary(context, "Billed " + subscription.getBillingCycle().name().toLowerCase(Locale.ROOT)));
         money.addView(Ui.text(context, MoneyText.format(subscription.getPrice(), subscription.getCurrency()), 28,
                 Ui.color(context, R.color.text_primary), true), margin(context, 0, 3, 0, 0));
-        money.addView(Ui.secondary(context, subscription.getCurrency()), margin(context, 0, 3, 0, 0));
         if (monthlyEquivalent != null) {
             money.addView(Ui.text(context, monthlyEquivalent + " / month equivalent", 14,
                     Ui.color(context, R.color.text_secondary), false), margin(context, 0, 12, 0, 0));
@@ -120,10 +119,6 @@ public final class ServicesScreen {
         if (subscription.getPlanName() != null && !subscription.getPlanName().trim().isEmpty()) {
             addDetailRow(context, page, "Plan", subscription.getPlanName());
         }
-        if (subscription.getProviderId() != null) {
-            addDetailRow(context, page, "Provider", "Linked provider #" + subscription.getProviderId());
-        }
-
         com.google.android.material.button.MaterialButton edit = Ui.button(context, "Edit service", true);
         edit.setOnClickListener(view -> actions.onEdit());
         page.addView(edit, margin(context, 0, 22, 0, 8));
@@ -156,8 +151,8 @@ public final class ServicesScreen {
 
         if (matching.isEmpty()) {
             String message = normalizedQuery.isEmpty() && "All".equals(filter)
-                    ? "No services yet. Add one to track its cost and renewal."
-                    : "No services match these filters.";
+                    ? "No services yet."
+                    : "No matching services.";
             list.addView(Ui.secondary(context, message), margin(context, 0, 20, 0, 12));
         } else {
             String currentCurrency = null;

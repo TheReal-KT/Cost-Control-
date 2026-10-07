@@ -58,9 +58,6 @@ public final class ReminderForm extends LinearLayout {
         setOrientation(VERTICAL);
         setPadding(Ui.dp(context, 20), Ui.dp(context, 8), Ui.dp(context, 20), Ui.dp(context, 28));
 
-        addView(Ui.secondary(context, "Choose a service and a future local time."),
-                margin(context, 0, 0, 0, 16));
-
         List<String> labels = new ArrayList<>();
         Long preferredId = original == null ? selectedSubscriptionId : original.getSubscriptionId();
         String selectedLabel = null;
@@ -99,7 +96,7 @@ public final class ReminderForm extends LinearLayout {
         time = addTime(context, "Local time", localTime);
         zone = addField(context, "Time zone", original == null ? ZoneId.systemDefault().getId()
                 : ZoneId.systemDefault().getId(), InputType.TYPE_CLASS_TEXT);
-        zone.setHelperText("IANA name; repeated clock times use the first occurrence");
+        zone.setHelperText("Repeated times use the first occurrence.");
 
         initialState = state();
         if (restoredState != null) restore(restoredState);

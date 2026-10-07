@@ -1,9 +1,11 @@
 package com.example.agentcostcontrol.ui;
 
 import android.content.Context;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.model.Recommendation;
@@ -30,7 +32,7 @@ public final class InsightsScreen {
         page.addView(localRiskChecks, margin(context, 0, 0, 0, 18));
         page.addView(Ui.section(context, "Recommendations"), margin(context, 0, 0, 0, 8));
         if (recommendations.isEmpty()) {
-            page.addView(Ui.secondary(context, "No recommendations are available yet."), margin(context, 0, 12, 0, 0));
+            page.addView(Ui.secondary(context, "No recommendations yet."), margin(context, 0, 12, 0, 0));
         }
         for (Recommendation recommendation : recommendations) {
             Subscription subscription = findSubscription(subscriptions, recommendation.getSubscriptionId());
@@ -41,8 +43,11 @@ public final class InsightsScreen {
             if (subscription != null) {
                 content.addView(Ui.secondary(context, subscription.getName()), margin(context, 0, 3, 0, 0));
             }
-            content.addView(Ui.text(context, recommendation.getReason(), 14,
-                    Ui.color(context, R.color.text_secondary), false), margin(context, 0, 8, 0, 0));
+            TextView reason = Ui.text(context, recommendation.getReason(), 14,
+                    Ui.color(context, R.color.text_secondary), false);
+            reason.setMaxLines(2);
+            reason.setEllipsize(TextUtils.TruncateAt.END);
+            content.addView(reason, margin(context, 0, 8, 0, 0));
             if (recommendation.getPotentialMonthlySaving() != null
                     && recommendation.getPotentialMonthlySaving().signum() > 0 && subscription != null) {
                 content.addView(Ui.secondary(context, "Estimated "
@@ -76,7 +81,7 @@ public final class InsightsScreen {
             page.addView(Ui.secondary(context, subscription.getName() + " · " + subscription.getCurrency()),
                     margin(context, 0, 2, 0, 18));
         }
-        page.addView(Ui.section(context, "Why you’re seeing this"), margin(context, 0, 0, 0, 6));
+        page.addView(Ui.section(context, "Reason"), margin(context, 0, 0, 0, 6));
         page.addView(Ui.text(context, recommendation.getReason(), 15,
                 Ui.color(context, R.color.text_primary), false), margin(context, 0, 0, 0, 16));
 
@@ -93,10 +98,10 @@ public final class InsightsScreen {
         addRow(context, page, "Action", ServicesScreen.titleCase(recommendation.getAction().name()));
         if (recordedDecision != null) {
             page.addView(Ui.text(context, ServicesScreen.titleCase(recordedDecision)
-                    + " recorded. Your service is unchanged.", 14,
+                    + " · service unchanged", 14,
                     Ui.color(context, R.color.positive), true), margin(context, 0, 18, 0, 6));
         } else {
-            page.addView(Ui.secondary(context, "Your decision is recorded here. Changes to your service happen with the provider."),
+            page.addView(Ui.secondary(context, "Saves your choice; service stays unchanged."),
                     margin(context, 0, 18, 0, 14));
             com.google.android.material.button.MaterialButton approve = Ui.button(context, "Approve idea", true);
             approve.setOnClickListener(view -> actions.onApprove());

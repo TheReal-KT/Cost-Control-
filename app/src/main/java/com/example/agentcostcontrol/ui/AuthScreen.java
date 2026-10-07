@@ -41,11 +41,6 @@ public final class AuthScreen extends LinearLayout {
         setOrientation(VERTICAL);
         setPadding(Ui.dp(context, 24), Ui.dp(context, 24), Ui.dp(context, 24), Ui.dp(context, 32));
 
-        addView(Ui.heading(context, heading(mode)), margin(context, 0, 0, 0, 8));
-        String subtitle = mode == Mode.SIGN_IN ? "Sign in to see your services and reminders."
-                : mode == Mode.CREATE_ACCOUNT ? "Create an account to track your recurring costs."
-                : "Finish setting up your account.";
-        addView(Ui.secondary(context, subtitle), margin(context, 0, 0, 0, 12));
         messageView = Ui.text(context, "", 14, Ui.color(context, R.color.brand_blue), false);
         messageView.setVisibility(View.GONE);
         addView(messageView, margin(context, 0, 0, 0, 16));
@@ -86,11 +81,13 @@ public final class AuthScreen extends LinearLayout {
         primary.setOnClickListener(view -> submit());
         addView(primary, margin(context, 0, 8, 0, 8));
         if (mode == Mode.SIGN_IN) {
-            MaterialButton create = Ui.textButton(context, "Create an account");
+            MaterialButton create = Ui.textButton(context, "Create account");
+            create.setId(R.id.auth_switch_mode);
             create.setOnClickListener(view -> actions.onOpenCreateAccount());
             addView(create, margin(context, 0, 0, 0, 0));
         } else if (mode == Mode.CREATE_ACCOUNT) {
-            MaterialButton signIn = Ui.textButton(context, "Already have an account? Sign in");
+            MaterialButton signIn = Ui.textButton(context, "Sign in");
+            signIn.setId(R.id.auth_switch_mode);
             signIn.setOnClickListener(view -> actions.onOpenSignIn());
             addView(signIn, margin(context, 0, 0, 0, 0));
         }
@@ -204,14 +201,6 @@ public final class AuthScreen extends LinearLayout {
 
     private static void setText(TextInputLayout field, String value) {
         if (field != null && field.getEditText() != null) field.getEditText().setText(value == null ? "" : value);
-    }
-
-    private static String heading(Mode mode) {
-        switch (mode) {
-            case CREATE_ACCOUNT: return "Create account";
-            case PROFILE_SETUP: return "Profile setup";
-            default: return "Welcome back";
-        }
     }
 
     private static LayoutParams margin(Context context, int start, int top, int end, int bottom) {

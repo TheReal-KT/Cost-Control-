@@ -34,12 +34,10 @@ public final class HomeScreen {
                               List<Reminder> reminders, Map<String, BigDecimal> monthlySpend,
                               int activeCount, boolean totalsComplete, Actions actions) {
         LinearLayout page = Ui.page(context);
-        page.addView(Ui.heading(context, "Your spend"));
-        page.addView(Ui.secondary(context, "Monthly recurring · currencies shown separately"),
-                margin(context, 0, 2, 0, 12));
+        page.addView(Ui.heading(context, "Monthly spend"));
 
         if (monthlySpend.isEmpty()) {
-            page.addView(Ui.text(context, "No active services yet.", 15,
+            page.addView(Ui.text(context, "No active services.", 15,
                     Ui.color(context, R.color.text_secondary), false), margin(context, 0, 8, 0, 12));
         } else {
             for (Map.Entry<String, BigDecimal> total : monthlySpend.entrySet()) {
@@ -47,8 +45,10 @@ public final class HomeScreen {
                         Ui.color(context, R.color.text_primary), true), margin(context, 0, 6, 0, 0));
             }
         }
-        page.addView(Ui.secondary(context, activeCount + " active " + (activeCount == 1 ? "service" : "services")),
-                margin(context, 0, 8, 0, 0));
+        if (activeCount > 0) {
+            page.addView(Ui.secondary(context, activeCount + " active " + (activeCount == 1 ? "service" : "services")),
+                    margin(context, 0, 8, 0, 0));
+        }
         if (!totalsComplete) {
             page.addView(Ui.secondary(context, "Totals include the first 1,000 services."),
                     margin(context, 0, 4, 0, 0));
@@ -63,14 +63,13 @@ public final class HomeScreen {
                 foundBudget = true;
                 BigDecimal spend = monthlySpend.getOrDefault(budget.getCurrency(), BigDecimal.ZERO);
                 String label = MoneyText.format(spend, budget.getCurrency()) + " of "
-                        + MoneyText.format(budget.getLimitAmount(), budget.getCurrency()) + " · "
-                        + budget.getCurrency() + " budget";
+                        + MoneyText.format(budget.getLimitAmount(), budget.getCurrency());
                 page.addView(Ui.text(context, label, 14, Ui.color(context, R.color.text_primary), false),
                         margin(context, 0, 10, 0, 0));
             }
         }
         if (!foundBudget) {
-            page.addView(Ui.secondary(context, "No budget for this month yet."), margin(context, 0, 8, 0, 0));
+            page.addView(Ui.secondary(context, "No budget this month."), margin(context, 0, 8, 0, 0));
         }
 
         addRule(context, page, 24);

@@ -14,6 +14,7 @@ import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.data.RiskThresholdStore;
 import com.example.agentcostcontrol.domain.RiskEvidence;
 import com.example.agentcostcontrol.domain.RiskFlag;
+import com.example.agentcostcontrol.domain.RiskFlagType;
 import com.example.agentcostcontrol.domain.RiskRuleConfig;
 import com.example.agentcostcontrol.domain.RiskRuleEngine;
 import com.example.agentcostcontrol.model.Budget;
@@ -78,7 +79,7 @@ public final class RiskChecksView extends LinearLayout {
         removeAllViews();
 
         LinearLayout headingRow = Ui.row(getContext());
-        headingRow.addView(Ui.section(getContext(), "Local risk checks"),
+        headingRow.addView(Ui.section(getContext(), "Checks"),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         MaterialButton settings = Ui.textButton(getContext(), "Thresholds");
         settings.setOnClickListener(view -> showThresholdSettings());
@@ -86,15 +87,10 @@ public final class RiskChecksView extends LinearLayout {
         addView(headingRow, margin(getContext(), 0, 0, 0, 4));
         if (!subscriptionsComplete) {
             addView(Ui.secondary(getContext(),
-                    "Partial results · " + subscriptions.size() + " services checked."),
+                    "Partial results · " + subscriptions.size()
+                            + (subscriptions.size() == 1 ? " service checked." : " services checked.")),
                     margin(getContext(), 0, 0, 0, 12));
         }
-        if (thresholds.isEmpty()) {
-            addView(Ui.secondary(getContext(),
-                    "Set thresholds to check high costs."),
-                    margin(getContext(), 0, 0, 0, 12));
-        }
-
         List<RiskFlag> flags = RiskRuleEngine.evaluate(subscriptions, budgets, asOfDate,
                 new RiskRuleConfig(RENEWAL_WINDOW_DAYS, thresholds, MAX_DISPLAYED_FLAGS));
         if (flags.isEmpty()) {
@@ -117,8 +113,10 @@ public final class RiskChecksView extends LinearLayout {
                 Ui.dp(getContext(), 14), Ui.dp(getContext(), 12));
         content.addView(Ui.text(getContext(), flag.getTitle(), 15,
                 Ui.color(getContext(), R.color.text_primary), true));
-        content.addView(Ui.secondary(getContext(), conciseExplanation(flag)),
-                margin(getContext(), 0, 4, 0, 0));
+        if (flag.getType() == RiskFlagType.POSSIBLE_DUPLICATE_CATEGORY) {
+            content.addView(Ui.secondary(getContext(), "Review whether you need both."),
+                    margin(getContext(), 0, 4, 0, 0));
+        }
 
         String evidence = evidenceSummary(flag.getEvidence());
         if (!evidence.isEmpty()) {
@@ -134,17 +132,6 @@ public final class RiskChecksView extends LinearLayout {
             }
         }
         return Ui.card(getContext(), content);
-    }
-
-    private String conciseExplanation(RiskFlag flag) {
-        switch (flag.getType()) {
-            case BUDGET_EXCEEDED: return "Spending exceeds your budget.";
-            case RENEWAL_APPROACHING: return "Renewal within " + RENEWAL_WINDOW_DAYS + " days.";
-            case LOW_USAGE_HIGH_COST: return "Reported low usage meets your high-cost threshold.";
-            case POSSIBLE_DUPLICATE_CATEGORY:
-                return "These services share a category. Review whether you need both.";
-            default: throw new IllegalArgumentException("Unsupported risk check");
-        }
     }
 
     private String serviceName(long id) {
@@ -274,8 +261,7 @@ public final class RiskChecksView extends LinearLayout {
             LinearLayout page = Ui.column(context);
             page.setPadding(Ui.dp(context, 4), Ui.dp(context, 4), Ui.dp(context, 4), Ui.dp(context, 4));
             page.addView(Ui.secondary(context,
-                    "A threshold flags active services with reported low usage when their monthly equivalent "
-                            + "meets that currency's amount. No threshold is assumed."),
+                    "Flag low-use services at or above this monthly amount."),
                     margin(context, 0, 0, 0, 12));
             page.addView(Ui.section(context, "Saved thresholds"), margin(context, 0, 0, 0, 4));
             savedThresholds = Ui.column(context);
@@ -303,7 +289,7 @@ public final class RiskChecksView extends LinearLayout {
         void renderSavedThresholds() {
             savedThresholds.removeAllViews();
             if (thresholds.isEmpty()) {
-                savedThresholds.addView(Ui.secondary(getContext(), "No thresholds set."));
+                savedThresholds.addView(Ui.secondary(getContext(), "No thresholds."));
                 return;
             }
             for (Map.Entry<String, BigDecimal> entry : thresholds.entrySet()) {

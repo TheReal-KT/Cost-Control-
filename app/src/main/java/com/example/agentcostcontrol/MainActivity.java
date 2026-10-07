@@ -659,7 +659,7 @@ public class MainActivity extends AppCompatActivity {
                     });
         } else if (hasMoreInRoot(targetRootForWrite(uncertainWriteRoute))) {
             builder.setTitle("Check more items")
-                    .setMessage("The refreshed list has more items. Load the next page before resolving this save.")
+                    .setMessage("Load the remaining items before resolving this save.")
                     .setPositiveButton("Load more", (ignored, which) -> {
                         uncertainWriteDialogVisible = false;
                         loadMore(targetRootForWrite(uncertainWriteRoute));
@@ -667,7 +667,7 @@ public class MainActivity extends AppCompatActivity {
                     .setNegativeButton("Keep checking", (ignored, which) -> uncertainWriteDialogVisible = false);
         } else {
             builder.setTitle("Was it saved?")
-                    .setMessage("Review the refreshed list and details. Choose Already saved only if the result you intended is visible; otherwise return to the saved draft to retry.")
+                    .setMessage("Check the refreshed list and details. Retry only if your change is missing.")
                     .setPositiveButton("Already saved", (ignored, which) -> resolveUncertainWrite(true))
                     .setNegativeButton("Not saved, retry", (ignored, which) -> resolveUncertainWrite(false))
                     .setNeutralButton("Inspect list", (ignored, which) -> uncertainWriteDialogVisible = false);
@@ -1615,7 +1615,6 @@ public class MainActivity extends AppCompatActivity {
     private void confirmSignOut() {
         new AlertDialog.Builder(this)
                 .setTitle("Sign out?")
-                .setMessage("You will need to sign in again to view your account data.")
                 .setNegativeButton("Stay signed in", (dialog, which) -> dialog.dismiss())
                 .setPositiveButton("Sign out", (dialog, which) -> signOut())
                 .show();

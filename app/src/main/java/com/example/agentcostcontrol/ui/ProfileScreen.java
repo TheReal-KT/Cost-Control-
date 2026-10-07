@@ -10,7 +10,6 @@ import com.example.agentcostcontrol.model.Budget;
 import com.example.agentcostcontrol.model.UserProfile;
 
 import java.time.Month;
-import java.time.YearMonth;
 import java.time.format.TextStyle;
 import java.util.List;
 import java.util.Locale;
@@ -34,7 +33,9 @@ public final class ProfileScreen {
         String name = (profile.getFirstName() + " " + profile.getLastName()).trim();
         account.addView(Ui.text(context, name.isEmpty() ? profile.getEmail() : name, 18,
                 Ui.color(context, R.color.text_primary), true));
-        account.addView(Ui.secondary(context, profile.getEmail()), margin(context, 0, 3, 0, 0));
+        if (!name.isEmpty()) {
+            account.addView(Ui.secondary(context, profile.getEmail()), margin(context, 0, 3, 0, 0));
+        }
         page.addView(Ui.card(context, account), margin(context, 0, 14, 0, 22));
 
         LinearLayout budgetTitle = Ui.row(context);
@@ -46,7 +47,7 @@ public final class ProfileScreen {
         page.addView(budgetTitle);
 
         if (budgets.isEmpty()) {
-            page.addView(Ui.secondary(context, "No budgets saved yet."), margin(context, 0, 10, 0, 4));
+            page.addView(Ui.secondary(context, "No budgets."), margin(context, 0, 10, 0, 4));
         } else {
             for (Budget budget : budgets) {
                 LinearLayout row = Ui.row(context);
@@ -54,7 +55,6 @@ public final class ProfileScreen {
                 String month = Month.of(budget.getMonth()).getDisplayName(TextStyle.FULL, Locale.getDefault());
                 copy.addView(Ui.text(context, month + " " + budget.getYear(), 15,
                         Ui.color(context, R.color.text_primary), true));
-                copy.addView(Ui.secondary(context, budget.getCurrency()), margin(context, 0, 3, 0, 0));
                 row.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
                 row.addView(Ui.text(context, MoneyText.format(budget.getLimitAmount(), budget.getCurrency()),
                         15, Ui.color(context, R.color.text_primary), true));
@@ -75,8 +75,6 @@ public final class ProfileScreen {
             page.addView(loadMore, margin(context, 0, 12, 0, 4));
         }
 
-        page.addView(Ui.section(context, "Preferences"), margin(context, 0, 26, 0, 8));
-        addPreference(context, page, "Amounts", "Shown in each service's saved currency; no conversion");
         addPreference(context, page, "Time zone", java.time.ZoneId.systemDefault().getId());
 
         com.google.android.material.button.MaterialButton signOut = Ui.textButton(context, "Sign out");

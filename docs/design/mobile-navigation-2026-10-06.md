@@ -16,6 +16,8 @@ The financial data contract remains authoritative: amounts use two-decimal preci
 
 ## Visual direction
 
+Follow the [UI copy rules](ui-copy.md): one title, concise labels and explanations only where they help the user act.
+
 The direction is **clear ledger**: an airy white canvas; a prominent money figure near the top; a thin electric-blue trend line with a very subtle fill; compact service rows separated by quiet dividers; and generous whitespace. Use strong ink for money and dates, electric blue for the next action, and restrained teal/amber/red signals for status. Place one saturated blue pill primary action beside a pale-blue secondary action above the bottom navigation. Avoid a stack of decorative cards and promotional clutter. Keep service rows text-led with neutral category marks or initials. Real provider logos are unnecessary. Use the same semantic action names in every screen, such as “Add service,” “Save service,” “Reschedule reminder,” and “Approve idea.”
 
 ### Design tokens

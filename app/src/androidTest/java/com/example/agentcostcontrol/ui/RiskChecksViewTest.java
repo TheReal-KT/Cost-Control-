@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(AndroidJUnit4.class)
@@ -45,7 +46,7 @@ public final class RiskChecksViewTest {
                     Collections.emptyList(), true, id -> openedId[0] = id);
 
             String visibleText = allText(view);
-            assertTrue(visibleText.contains("Local risk checks"));
+            assertTrue(visibleText.contains("Checks"));
             assertTrue(visibleText.contains("Low usage and high cost"));
             assertTrue(visibleText.contains("Synthetic service"));
             assertTrue(visibleText.contains("150.00 ZAR"));
@@ -61,13 +62,17 @@ public final class RiskChecksViewTest {
     public void marksPartialDataAndDoesNotInventAHighCostThreshold() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             Context context = themedContext();
-            RiskChecksView view = new RiskChecksView(context, UUID.randomUUID().toString(),
-                    Collections.emptyList(), Collections.emptyList(), false, null);
+            String userId = UUID.randomUUID().toString();
+            RiskChecksView view = new RiskChecksView(context, userId,
+                    Collections.singletonList(subscription(23, UsageLevel.LOW)),
+                    Collections.emptyList(), false, null);
 
             String visibleText = allText(view);
             assertTrue(visibleText.contains("Partial results"));
-            assertTrue(visibleText.contains("0 services checked"));
-            assertTrue(visibleText.contains("Set thresholds to check high costs"));
+            assertTrue(visibleText.contains("1 service checked"));
+            assertTrue(visibleText.contains("No checks to show"));
+            assertFalse(visibleText.contains("Low usage and high cost"));
+            assertTrue(new RiskThresholdStore(context, userId).loadMonthlyHighCostThresholds().isEmpty());
         });
     }
 

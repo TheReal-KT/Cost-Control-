@@ -38,8 +38,6 @@ public final class BudgetForm extends LinearLayout {
         setPadding(Ui.dp(context, 20), Ui.dp(context, 8), Ui.dp(context, 20), Ui.dp(context, 28));
 
         YearMonth now = YearMonth.now();
-        addView(Ui.secondary(context, "Budgets compare monthly costs in the same currency."),
-                margin(context, 0, 0, 0, 16));
         amount = addField(context, "Monthly limit", original == null ? "" : original.getLimitAmount().toPlainString(),
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         currency = addField(context, "Currency", original == null ? "ZAR" : original.getCurrency(),

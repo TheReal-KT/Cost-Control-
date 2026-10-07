@@ -38,7 +38,6 @@ public final class RemindersScreen {
                             String filter, boolean hasMore, Actions actions) {
         String selectedFilter = filter == null ? "Upcoming" : filter;
         LinearLayout page = Ui.page(context);
-        page.addView(Ui.secondary(context, "Schedules you manage for your services."), margin(context, 0, 2, 0, 12));
 
         ChipGroup filters = new ChipGroup(context);
         filters.setSingleSelection(true);
@@ -121,7 +120,7 @@ public final class RemindersScreen {
         matching.sort(Comparator.comparing(Reminder::getRemindAt));
         if (matching.isEmpty()) {
             parent.addView(Ui.secondary(context, "Completed".equals(filter)
-                    ? "No completed reminders yet." : "No upcoming reminders. Add one when it will help."),
+                    ? "No completed reminders." : "No upcoming reminders."),
                     margin(context, 0, 14, 0, 12));
         }
         for (Reminder reminder : matching) {
