@@ -24,7 +24,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 
 The connected test command needs a running emulator or device. Auth-guard tests expect a fresh installation without a saved session. Each team member must still verify clone, build, sign-in and navigation on their own environment; this repository cannot verify five machines automatically.
 
-If OneDrive locks generated build files, use a temporary Gradle init script to set `project.layout.buildDirectory` to a local directory outside the sync folder, then pass it with `-I`. Do not delete source or disable verification to resolve a generated-output lock.
+If OneDrive locks generated build files, add an absolute `BUILD_OUTPUT_DIR` path outside the sync folder to ignored `local.properties`, for example `BUILD_OUTPUT_DIR=C:/Users/YOUR_NAME/AppData/Local/AgentCostControl/build`. Sync the project again in Android Studio. Gradle places each project's generated output beneath that folder, including the APK at `app/outputs/apk/debug/app-debug.apk`. This setting applies to both Android Studio and normal command-line builds; without it, the usual project-local build folders are used. Do not delete source or disable verification to resolve a generated-output lock.
 
 ## Application boundaries
 
