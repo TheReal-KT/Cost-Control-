@@ -7,13 +7,12 @@
         <item name="colorOnPrimaryContainer">@color/brand_blue</item>
         <item name="colorSurface">@color/surface</item>
         <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorSurfaceVariant">@color/app_background</item>
+        <item name="colorSurfaceVariant">@color/surface_raised</item>
         <item name="colorOutline">@color/card_outline</item>
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:statusBarColor">@color/surface</item>
         <item name="android:navigationBarColor">@color/surface</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
     </style>
 
     <style name="BrandMark">
@@ -25,7 +24,7 @@
 
     <style name="ScreenTitle">
         <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">19sp</item>
+        <item name="android:textSize">18sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
@@ -38,7 +37,7 @@
 
     <style name="PageHeading">
         <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">30sp</item>
+        <item name="android:textSize">26sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
@@ -93,7 +92,7 @@
 
     <style name="SectionTitle">
         <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">19sp</item>
+        <item name="android:textSize">17sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 

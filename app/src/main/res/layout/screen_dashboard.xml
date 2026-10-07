@@ -82,7 +82,7 @@
                     android:layout_marginStart="12dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_nav_insights"
-                    android:tint="@color/surface" />
+                    app:tint="@color/surface" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

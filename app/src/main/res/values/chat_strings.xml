@@ -1,0 +1,22 @@
+<resources>
+    <string name="chat_empty">Ask about subscriptions.</string>
+    <string name="chat_prompt_hint">Ask AI</string>
+    <string name="chat_model_short">Nemotron Lightning</string>
+    <string name="chat_model_full">Nemotron 3.5 Lightning (free)</string>
+    <string name="chat_model_selector">Choose model</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_wait">Thinking…</string>
+    <string name="chat_not_configured">Chat is not connected yet.</string>
+    <string name="chat_sign_in">Sign in to use Chat.</string>
+    <string name="chat_failed">Couldn’t send. Try again.</string>
+    <string name="chat_limited">Chat limit reached. Try later.</string>
+    <string name="chat_session_expired">Your session expired. Sign in again.</string>
+    <string name="chat_conversation_expired">Chat expired. Send again.</string>
+    <string name="chat_invalid_response">The assistant returned an invalid response.</string>
+    <string name="chat_prompt_too_long">Keep your question under 4,000 characters.</string>
+    <string name="chat_free_notice">Use sample data only with this free model.</string>
+    <string name="chat_you">You</string>
+    <string name="chat_assistant">Assistant</string>
+    <string name="chat_endpoint_invalid">Chat needs a secure server connection.</string>
+</resources>
