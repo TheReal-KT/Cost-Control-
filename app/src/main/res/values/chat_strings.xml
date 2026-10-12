@@ -1,11 +1,13 @@
 <resources>
     <string name="chat_prompt_hint">Ask AI</string>
     <string name="chat_model_short">Nemotron</string>
-    <string name="chat_model_full">Nemotron 3.5 Lightning (free)</string>
-    <string name="chat_model_selector">Choose model. NVIDIA Nemotron 3.5 Lightning, free.</string>
+    <string name="chat_model_full">Nemotron 3 Super (free)</string>
+    <string name="chat_model_selector">Choose model. NVIDIA Nemotron 3 Super, free.</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>
     <string name="chat_wait">Thinking…</string>
+    <string name="chat_streaming">Responding…</string>
+    <string name="chat_incomplete">Incomplete answer</string>
     <string name="chat_not_configured">Chat is not connected yet.</string>
     <string name="chat_sign_in">Sign in to use Chat.</string>
     <string name="chat_failed">Couldn’t send. Try again.</string>

@@ -26,6 +26,31 @@ The connected test command needs a running emulator or device. Auth-guard tests 
 
 If OneDrive locks generated build files, add an absolute `BUILD_OUTPUT_DIR` path outside the sync folder to ignored `local.properties`, for example `BUILD_OUTPUT_DIR=C:/Users/YOUR_NAME/AppData/Local/AgentCostControl/build`. Sync the project again in Android Studio. Gradle places each project's generated output beneath that folder, including the APK at `app/outputs/apk/debug/app-debug.apk`. This setting applies to both Android Studio and normal command-line builds; without it, the usual project-local build folders are used. Do not delete source or disable verification to resolve a generated-output lock.
 
+### Connect the emulator to local AI
+
+Configure ignored `backend/.env` as described in [backend setup](backend/README.md), start one emulator, and run from the repository root using PowerShell 7:
+
+```powershell
+pwsh -File scripts/Initialize-LocalDemo.ps1
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+.\gradlew.bat :app:installDebug
+```
+
+Initialization generates a 30-day localhost TLS certificate and private key in ignored `.local-demo/`, sets Android's ignored `AI_ENDPOINT_URL` to `https://127.0.0.1:8443/ai/chat`, and forwards device port 8443 to this computer using ADB. Only the public certificate enters debug resources, trusted only for loopback; release builds retain system certificate trust and exclude it. Rerun initialization after an emulator/ADB restart; rebuild after certificate renewal. This requires no public tunnel or machine-wide certificate installation. Start the backend in another terminal:
+
+```powershell
+cd backend
+uv run --locked --env-file .env uvicorn agentic_subscription_manager.api:create_app --factory --host 127.0.0.1 --port 8443 --ssl-keyfile ../.local-demo/server.key.pem --ssl-certfile ../.local-demo/server.cert.pem --no-access-log
+```
+
+Open **Cost Control**, sign in, then **AI → Chat**. Ask “Explain my monthly spend” to stream a fictional example. The separate **Cost Control Preview** launcher contains sample subscription screens and cannot authenticate chat. Stop keeps partial text labelled incomplete and retains the question for retry. For an opt-in emulator-to-backend TLS/Auth check, with the server running:
+
+```powershell
+.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.example.agentcostcontrol.chat.LocalAiConnectionTest' '-Pandroid.testInstrumentationRunnerArguments.verifyLocalAi=true'
+```
+
+For a physical Android device, connect it by USB with debugging enabled and use the same ADB forwarding; initialize with one device/emulator attached. A release build requires a publicly trusted HTTPS endpoint configured separately.
+
 ## Application boundaries
 
 Debug builds also install a **Cost Control Preview** launcher. It shows 13 fictional subscriptions,
@@ -41,9 +66,9 @@ saved session are unaffected. See [brand architecture comparison](docs/design/br
 - `ui` and `MainActivity`: native presentation, form state, navigation and background-result coordination. Root tabs are peers; task routes return to their origin.
 - `chat`: client for an authenticated application AI endpoint. It does not contact OpenRouter directly or include a provider credential.
 
-The AI root contains Chat and Insights. Chat keeps its model control inside the prompt field. The only initially supported model is `nvidia/nemotron-3.5-lightning:free`; its provider's data terms require a synthetic-data prototype. Backend configuration must enforce that constraint, not trust the client's `data_mode` field. With no AI endpoint configured, Send keeps the draft and reports that Chat is not connected. No generated answer is simulated.
+The AI root contains Chat and Insights. Chat keeps its model control inside the prompt field. The supported model is `nvidia/nemotron-3-super-120b-a12b:free`. The prototype remains synthetic-only until endpoint data handling is reviewed for private records. The backend enforces this constraint. With no AI endpoint configured, Send keeps the draft and reports that Chat is not connected. No generated answer is simulated.
 
-The Python/FastAPI service now implements `/ai/chat` with three Python LangGraph nodes. It accepts `prompt`, `model`, optional `conversation_id`, and `data_mode: "synthetic"`, verifies the Supabase session, and returns bounded JSON containing `answer` and a caller-bound correlation ID. It selects supported topics locally and sends only fictional fixture evidence to the model; raw questions and real account records are never forwarded. Legacy Python login/CRUD routes are inactive. The endpoint has not been deployed or configured in Android. See [backend setup and limitations](backend/README.md), [ADR 0002](docs/adr/0002-python-langgraph-ai-boundary.md) and [AI architecture](docs/design/ai-chat-architecture.md). Streaming, source links and durable history remain separate work.
+The Python/FastAPI service implements `/ai/chat` with three Python LangGraph nodes. It accepts `prompt`, `model`, optional `conversation_id`, `data_mode: "synthetic"`, and optional `stream: true`. It verifies the Supabase session, then streams application events to Android; JSON replies remain supported. It selects supported topics locally and sends only fictional fixture evidence to the model; raw questions and real account records are never forwarded. There are no model tools, write executors or Gmail connections. Legacy Python login/CRUD routes are inactive. See [backend setup](backend/README.md), [ADR 0003](docs/adr/0003-streaming-local-android-ai.md) and [AI architecture](docs/design/ai-chat-architecture.md). Source links, private-account analysis and durable history remain separate work.
 
 Approval of an insight records a decision. It never cancels a provider service or moves money. Reminder CRUD saves schedules; local notification delivery is a separate planner task.
 

@@ -120,11 +120,19 @@
                 </LinearLayout>
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/chat_send"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:minWidth="48dp"
                     android:minHeight="48dp"
-                    android:text="@string/chat_send"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="@string/chat_send"
                     android:textAllCaps="false"
+                    app:icon="@drawable/ic_chat_send"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="24dp"
                     app:cornerRadius="24dp" />
             </LinearLayout>
         </LinearLayout>

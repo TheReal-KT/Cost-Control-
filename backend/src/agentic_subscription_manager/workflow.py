@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 from typing import TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from .adapters import OpenRouterExplanation
@@ -21,6 +22,7 @@ class AnalysisState(TypedDict, total=False):
     records: tuple[SubscriptionEvidence, ...]
     evidence: dict
     answer: str
+    streaming: bool
 
 
 def build_graph(provider: OpenRouterExplanation):
@@ -32,9 +34,19 @@ def build_graph(provider: OpenRouterExplanation):
         return {"evidence": calculate_evidence(state["records"], state["today"])}
 
     async def explain(state: AnalysisState) -> dict:
-        text = await provider.explain(state["task"], state["evidence"])
         facts = render_facts(state["task"], state["evidence"])
-        return {"answer": f"Fictional example — {state['evidence']['as_of']}\n{facts}\n\n{text}"}
+        prefix = f"Fictional example — {state['evidence']['as_of']}\n{facts}\n\n"
+        if state.get("streaming"):
+            writer = get_stream_writer()
+            writer({"text": prefix})
+            parts: list[str] = []
+            async for part in provider.stream_explain(state["task"], state["evidence"]):
+                parts.append(part)
+                writer({"text": part})
+            text = "".join(parts)
+        else:
+            text = await provider.explain(state["task"], state["evidence"])
+        return {"answer": prefix + text}
 
     graph = StateGraph(AnalysisState)
     graph.add_node("load_example", load_example)

@@ -60,3 +60,46 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }
+
+// A locally generated public certificate is used only by debug builds on loopback.
+// The private key stays in ignored .local-demo and never enters Android resources.
+val localCertificatePath = clientConfig("LOCAL_AI_CERT_FILE").trim()
+if (localCertificatePath.isNotEmpty()) {
+    val localCertificate = rootProject.file(localCertificatePath)
+    require(localCertificate.isFile) { "Run scripts/Initialize-LocalDemo.ps1 to create LOCAL_AI_CERT_FILE." }
+    androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+        val generateLocalDemoResources = tasks.register<LocalDemoResources>("generateLocalDemoResources") {
+            certificate.set(localCertificate)
+            outputDirectory.set(layout.buildDirectory.dir("generated/localDemoResources"))
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(generateLocalDemoResources, LocalDemoResources::outputDirectory)
+    }
+}
+
+abstract class LocalDemoResources : DefaultTask() {
+    @get:InputFile
+    abstract val certificate: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val directory = outputDirectory.get().asFile
+        val raw = directory.resolve("raw").apply { mkdirs() }
+        certificate.get().asFile.copyTo(raw.resolve("local_demo_certificate.pem"), overwrite = true)
+        val xml = directory.resolve("xml").apply { mkdirs() }
+        xml.resolve("network_security_config.xml").writeText("""
+            <network-security-config>
+                <base-config cleartextTrafficPermitted="false">
+                    <trust-anchors><certificates src="system" /></trust-anchors>
+                </base-config>
+                <domain-config cleartextTrafficPermitted="false">
+                    <domain>127.0.0.1</domain>
+                    <domain>localhost</domain>
+                    <trust-anchors><certificates src="@raw/local_demo_certificate" /></trust-anchors>
+                </domain-config>
+            </network-security-config>
+        """.trimIndent())
+    }
+}
