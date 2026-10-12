@@ -2,6 +2,8 @@
 
 Branch: `chat-history-ui`.
 
+This records the initial history implementation. The subsequent actual-question and real-account change is covered in [real-account chat verification](real-account-chat-verification-2026-10-12.md).
+
 ## Implemented
 
 - Compact Chat/Insights controls hide on the first accepted Send and return with New Chat.

@@ -87,7 +87,7 @@ Deleting a subscription cascades to its reminders, notifications and recommendat
 
 Activity records are created by database triggers. Clients cannot insert, alter or delete activity, or fabricate AI recommendations/notification deliveries. The privileged trigger writer is confined to a non-exposed `private` schema with a fixed search path and no API execution grant. Public tables all use row-level security, and anonymous access and broad privileges such as TRUNCATE are revoked.
 
-The future AI endpoint must authenticate the caller, resolve their profile and load only their subscriptions. Validate bounded outputs before a trusted write to `recommendations`. Service-role access bypasses RLS, so ownership must be enforced in the endpoint too. The Android app owns display and user decisions. API keys, model calls and orchestration stay on the backend.
+The AI endpoint authenticates the caller, resolves the canonical profile and loads only owned subscriptions, current budget and time-zone preferences. It uses the caller's JWT and a publishable key, with explicit owner filters, validated ownership and RLS; there is no service-role bypass. The actual question and relevant facts go to OpenRouter; identity fields and tokens do not. It performs no database writes. Any future recommendation writer must validate bounded outputs and enforce ownership at its trusted boundary. The Android app owns display and user decisions. API keys, model calls and orchestration stay on the backend. See [ADR 0005](adr/0005-real-account-ai-chat.md).
 
 The schema stores reminder schedules and notification records. It does not run a scheduler or send Android push notifications. That remains a separate planner task.
 

@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.Espresso.pressBack;
+import static androidx.test.espresso.matcher.RootMatchers.isDialog;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
 import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
@@ -354,7 +355,7 @@ public final class ChatAndAuthTest {
                 });
 
                 assertTrue("History request did not finish", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDisplayed(title);
+                waitForDialogText(title);
                 onView(withText(title)).perform(click());
                 assertTrue("Turn request did not finish", turnsLoaded.await(5, TimeUnit.SECONDS));
                 waitForDisplayed(question);
@@ -428,7 +429,7 @@ public final class ChatAndAuthTest {
                 });
 
                 assertTrue("History list did not load", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDisplayed("Updated sample chat");
+                waitForDialogText("Updated sample chat");
                 onView(withText("Updated sample chat")).perform(click());
                 assertTrue("Remote turn did not load", turnsLoaded.await(5, TimeUnit.SECONDS));
                 waitForDisplayed(localAnswer);
@@ -469,15 +470,20 @@ public final class ChatAndAuthTest {
                 });
 
                 assertTrue("History request did not finish", initialListLoaded.await(5, TimeUnit.SECONDS));
-                waitForDisplayed(title);
+                waitForDialogText(title);
                 String deleteDescription = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_delete) + ": " + title;
                 onView(withContentDescription(deleteDescription)).perform(click());
                 onView(withText(R.string.chat_history_delete_message)).check(matches(isDisplayed()));
                 onView(withText(R.string.chat_cancel)).perform(click());
                 assertEquals(0, history.deleteCount.get());
+                String confirmation = InstrumentationRegistry.getInstrumentation().getTargetContext()
+                        .getString(R.string.chat_history_delete_message);
+                waitForTextToDisappear(confirmation);
+                waitForDialogText(title);
 
                 onView(withContentDescription(deleteDescription)).perform(click());
+                waitForDialogText(confirmation);
                 onView(withText(R.string.chat_delete)).perform(click());
                 assertTrue("Delete request did not finish", deleteFinished.await(5, TimeUnit.SECONDS));
                 assertTrue("History was not refreshed after delete", historyReloaded.await(5, TimeUnit.SECONDS));
@@ -540,7 +546,7 @@ public final class ChatAndAuthTest {
                 });
 
                 assertTrue("History list did not load", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDisplayed(title);
+                waitForDialogText(title);
                 String deleteDescription = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_delete) + ": " + title;
                 onView(withContentDescription(deleteDescription)).perform(click());
@@ -605,10 +611,10 @@ public final class ChatAndAuthTest {
                 assertTrue("History request did not finish", firstLoad.await(5, TimeUnit.SECONDS));
                 String failure = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_load_failed);
-                waitForDisplayed(failure);
+                waitForDialogText(failure);
                 onView(withText(R.string.chat_retry)).perform(click());
                 assertTrue("Retry did not finish", retryLoad.await(5, TimeUnit.SECONDS));
-                waitForDisplayed(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                waitForDialogText(InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_empty));
             } finally {
                 scenario.onActivity(activity -> {
@@ -617,6 +623,11 @@ public final class ChatAndAuthTest {
                 });
             }
         }
+    }
+
+    private static void waitForDialogText(String text) {
+        // The activity loses focus while history/confirmation dialogs are opening.
+        onView(withText(text)).inRoot(isDialog()).check(matches(isDisplayed()));
     }
 
     private static void waitForDisplayed(String text) {

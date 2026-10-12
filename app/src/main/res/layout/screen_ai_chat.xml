@@ -146,6 +146,15 @@
         android:textAllCaps="false"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/chat_data_notice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="6dp"
+        android:text="@string/chat_data_notice"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

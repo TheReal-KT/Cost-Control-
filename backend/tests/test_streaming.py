@@ -12,7 +12,6 @@ from test_ai import CONFIG, FakeUpstreams
 from agentic_subscription_manager.adapters import OpenRouterExplanation
 from agentic_subscription_manager.api import create_app
 from agentic_subscription_manager.contracts import MODEL_ID
-from agentic_subscription_manager.evidence import AnalysisTask
 
 
 def chunk(text=None, finish=None, **delta):
@@ -82,9 +81,9 @@ class StreamingContracts(unittest.TestCase):
         return self.client.post(
             "/ai/chat",
             json={
-                "prompt": "monthly spending PRIVATE_PERSON",
+                "prompt": "Explain monthly spending in one sentence",
                 "model": MODEL_ID,
-                "data_mode": "synthetic",
+                "data_mode": "account",
                 "stream": True,
                 **fields,
             },
@@ -108,7 +107,10 @@ class StreamingContracts(unittest.TestCase):
         self.assertEqual(MODEL_ID, body["model"])
         self.assertEqual("none", body["tool_choice"])
         self.assertNotIn("tools", body)
-        self.assertNotIn("PRIVATE", request.content.decode())
+        self.assertEqual(
+            "Explain monthly spending in one sentence", body["messages"][-1]["content"]
+        )
+        self.assertNotIn("user-a", request.content.decode())
         self.assertEqual(0, self.app.state.budget.in_flight)
 
     def test_auth_and_conversation_checks_happen_before_streaming(self):
@@ -119,16 +121,20 @@ class StreamingContracts(unittest.TestCase):
         self.assertEqual(404, self.ask(token="user-b", conversation_id=identifier).status_code)
         self.assertEqual(count, len(self.upstreams.provider_requests))
 
-    def test_unsupported_question_is_a_completed_local_stream_without_provider(self):
-        received = events(self.ask(prompt="weather"))
-        self.assertEqual(["start", "delta", "done"], [v[0] for v in received])
-        self.assertEqual([], self.upstreams.provider_requests)
+    def test_general_question_streams_model_reply_without_sample_facts_header(self):
+        received = events(self.ask(prompt="Which model are you?"))
+        self.assertEqual(["start", "delta", "delta", "done"], [v[0] for v in received])
+        self.assertEqual(
+            "Review fictional plans.",
+            "".join(part["text"] for name, part in received if name == "delta"),
+        )
+        self.assertEqual(1, len(self.upstreams.provider_requests))
 
     def test_invalid_stream_requests_are_rejected(self):
         for fields in (
             {"stream": "true"},
             {"tools": []},
-            {"data_mode": "real"},
+            {"data_mode": "synthetic"},
             {"model": "nvidia/nemotron-3.5-lightning:free"},
         ):
             self.assertEqual(422, self.ask(**fields).status_code)
@@ -228,7 +234,7 @@ class StreamingCancellation(unittest.IsolatedAsyncioTestCase):
                     {
                         "prompt": "monthly spending",
                         "model": MODEL_ID,
-                        "data_mode": "synthetic",
+                        "data_mode": "account",
                         "stream": True,
                     }
                 ).encode(),
@@ -291,7 +297,7 @@ class StreamingCancellation(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
             provider = OpenRouterExplanation(client, "synthetic")
-            async with aclosing(provider.stream_explain(AnalysisTask.SPEND, {})) as stream:
+            async with aclosing(provider.stream_explain("Explain spending", {})) as stream:
                 self.assertEqual("First", await anext(stream))
                 self.assertFalse(resumed.is_set())
             self.assertTrue(closed.is_set())

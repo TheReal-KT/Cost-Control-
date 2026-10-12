@@ -11,7 +11,7 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     prompt: str = Field(min_length=1, max_length=4000)
     model: Literal["nvidia/nemotron-3-super-120b-a12b:free"]
-    data_mode: Literal["synthetic"]
+    data_mode: Literal["account"]
     conversation_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
     stream: bool = False
 

@@ -70,7 +70,7 @@ public final class ChatClient {
             connection.setRequestProperty("Authorization", "Bearer " + accessToken);
             connection.setDoOutput(true);
             JSONObject request = new JSONObject().put("prompt", prompt).put("model", MODEL_ID)
-                    .put("data_mode", "synthetic").put("stream", listener != null);
+                    .put("data_mode", "account").put("stream", listener != null);
             if (conversationId != null) request.put("conversation_id", conversationId);
             byte[] bytes = request.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(bytes.length);

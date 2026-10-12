@@ -2,6 +2,8 @@
 
 Date: 12 October 2026. Status: implemented on the feature branch.
 
+The fictional-only evidence restriction below is superseded by [ADR 0005](0005-real-account-ai-chat.md). The streaming, local TLS and no-write-tool decisions remain.
+
 ## Context
 
 The local demonstration needs a working Android-to-backend connection, Nemotron 3 Super free, incremental answers and Stop. The existing Supabase identity boundary and fictional-only workflow must remain. Gmail/Composio connections are explicitly outside this change.

@@ -1,4 +1,4 @@
-"""Small single-worker API for authenticated, synthetic-only AI analysis."""
+"""Small single-worker API for authenticated, read-only account AI analysis."""
 
 import asyncio
 import json
@@ -16,9 +16,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .account import SupabaseAccountReads
 from .adapters import OpenRouterExplanation, RemoteFailure, SupabaseIdentity
 from .contracts import ChatReply, ChatRequest
-from .evidence import AnalysisTask, select_task
+from .evidence import AccountEvidence, AnalysisTask, select_task
 from .security import ConversationIds, Settings
 from .workflow import build_graph
 
@@ -101,7 +102,9 @@ class RequestBudget:
 
 
 # Run the AI graph until the client disconnects.
-async def run_until_disconnect(request: Request, graph, task):
+async def run_until_disconnect(
+    request: Request, graph, task, prompt: str, account: AccountEvidence
+):
     """Stop local graph/HTTP work on disconnect; remote provider cancellation is best effort."""
 
     async def disconnected() -> None:
@@ -110,7 +113,9 @@ async def run_until_disconnect(request: Request, graph, task):
             if (await request.receive())["type"] == "http.disconnect":
                 return
 
-    run = asyncio.create_task(graph.ainvoke({"task": task}, {"recursion_limit": 5}))
+    run = asyncio.create_task(
+        graph.ainvoke({"task": task, "prompt": prompt, "account": account}, {"recursion_limit": 5})
+    )
     monitor = asyncio.create_task(disconnected())
     try:
         done, _ = await asyncio.wait({run, monitor}, return_when=asyncio.FIRST_COMPLETED)
@@ -123,7 +128,9 @@ async def run_until_disconnect(request: Request, graph, task):
         await asyncio.gather(run, monitor, return_exceptions=True)
 
 
-async def graph_deltas(graph, task: AnalysisTask) -> AsyncIterator[dict[str, str]]:
+async def graph_deltas(
+    graph, task: AnalysisTask | None, prompt: str, account: AccountEvidence
+) -> AsyncIterator[dict[str, str]]:
     """Keep graph cancellation/cleanup outside Starlette's repeatedly cancelled scope."""
     queue: asyncio.Queue[dict[str, str] | Exception | None] = asyncio.Queue(maxsize=1)
 
@@ -131,7 +138,7 @@ async def graph_deltas(graph, task: AnalysisTask) -> AsyncIterator[dict[str, str
         try:
             async with aclosing(
                 graph.astream(
-                    {"task": task, "streaming": True},
+                    {"task": task, "prompt": prompt, "account": account, "streaming": True},
                     {"recursion_limit": 5},
                     stream_mode="custom",
                 )
@@ -175,6 +182,9 @@ def create_app(
             app.state.identity = SupabaseIdentity(
                 client, config.supabase_url, config.publishable_key
             )
+            app.state.account_reads = SupabaseAccountReads(
+                client, config.supabase_url, config.publishable_key
+            )
             app.state.conversations = ConversationIds(config.conversation_secret)
             app.state.graph = build_graph(OpenRouterExplanation(client, config.provider_key))
             app.state.budget = RequestBudget()
@@ -193,7 +203,7 @@ def create_app(
         return {
             "status": "ok",
             "chat_configured": app.state.settings.configured,
-            "data_mode": "synthetic",
+            "data_mode": "account",
         }
 
     def require_token(request: Request) -> str:
@@ -204,7 +214,9 @@ def create_app(
             raise RemoteFailure(503, "Chat is not configured")
         return token
 
-    async def prepare_chat(payload: ChatRequest, token: str) -> tuple[AnalysisTask | None, str]:
+    async def prepare_chat(
+        payload: ChatRequest, token: str
+    ) -> tuple[AnalysisTask | None, str, AccountEvidence]:
         owner = await app.state.identity.verify(token)
         conversations = app.state.conversations
         if payload.conversation_id is not None:
@@ -214,9 +226,9 @@ def create_app(
         else:
             conversation = conversations.issue(owner)
         task = select_task(payload.prompt)
-        if task is not None:
-            app.state.budget.reserve_call(owner)
-        return task, conversation
+        app.state.budget.reserve_call(owner)
+        account = await app.state.account_reads.load(owner, token)
+        return task, conversation, account
 
     @app.post("/ai/chat", response_model=ChatReply)
     async def chat(payload: ChatRequest, request: Request):
@@ -228,16 +240,10 @@ def create_app(
         try:
             token = require_token(request)
             async with app.state.budget.admit(), asyncio.timeout(38):
-                task, conversation = await prepare_chat(payload, token)
-                if task is None:
-                    return ChatReply(
-                        answer=(
-                            "Fictional examples only. "
-                            "Ask about spending, renewals, budgets or usage."
-                        ),
-                        conversation_id=conversation,
-                    )
-                result = await run_until_disconnect(request, app.state.graph, task)
+                task, conversation, account = await prepare_chat(payload, token)
+                result = await run_until_disconnect(
+                    request, app.state.graph, task, payload.prompt, account
+                )
                 return ChatReply(answer=result["answer"], conversation_id=conversation)
         except TimeoutError:
             status = 504
@@ -280,7 +286,7 @@ def create_app(
         try:
             token = require_token(request)
             async with app.state.budget.admit(), asyncio.timeout(38):
-                task, conversation = await prepare_chat(payload, token)
+                task, conversation, account = await prepare_chat(payload, token)
         except (RemoteFailure, TimeoutError) as error:
             status = error.status if isinstance(error, RemoteFailure) else 504
             detail = error.code if isinstance(error, RemoteFailure) else "AI request timed out"
@@ -305,18 +311,11 @@ def create_app(
                     asyncio.timeout(max(0, 38 - (time.monotonic() - started))),
                 ):
                     yield event("start", {"conversation_id": conversation})
-                    if task is None:
-                        yield event(
-                            "delta",
-                            {
-                                "text": "Fictional examples only. Ask about "
-                                "spending, renewals, budgets or usage."
-                            },
-                        )
-                    else:
-                        async with aclosing(graph_deltas(app.state.graph, task)) as parts:
-                            async for part in parts:
-                                yield event("delta", {"text": part["text"]})
+                    async with aclosing(
+                        graph_deltas(app.state.graph, task, payload.prompt, account)
+                    ) as parts:
+                        async for part in parts:
+                            yield event("delta", {"text": part["text"]})
                     yield event("done", {"conversation_id": conversation})
             except TimeoutError:
                 status = 504

@@ -39,7 +39,8 @@
     <string name="chat_pending_state_limit">Some unsaved replies exceeded the safe restore limit. Retry saves so they’re stored in history before leaving the chat.</string>
     <string name="chat_incomplete">Incomplete answer</string>
     <string name="chat_no_response">No response was received.</string>
-    <string name="chat_empty_subtitle">Ask about your subscriptions and sample spending.</string>
+    <string name="chat_empty_subtitle">Ask Nemotron about your subscriptions, spending and renewals.</string>
+    <string name="chat_data_notice">Your question and account facts go to OpenRouter.</string>
     <string name="chat_suggestion_renew">What renews next?</string>
     <string name="chat_suggestion_spend">Explain my monthly spend</string>
     <string name="chat_suggestion_review">Which services should I review?</string>
@@ -51,7 +52,7 @@
     <string name="chat_conversation_expired">Chat session expired. Retrying will start a fresh answer context.</string>
     <string name="chat_invalid_response">The assistant returned an invalid response.</string>
     <string name="chat_prompt_too_long">Keep your question under 4,000 characters.</string>
-    <string name="chat_free_notice">Use sample data only with this free model.</string>
+    <string name="chat_free_notice">Nemotron reads your subscriptions and current budget. Questions and account facts are sent to OpenRouter; it cannot change your account.</string>
     <string name="chat_you">You</string>
     <string name="chat_assistant">Nemotron</string>
     <string name="chat_endpoint_invalid">Chat needs a secure server connection.</string>

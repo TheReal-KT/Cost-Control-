@@ -2,6 +2,8 @@
 
 Date: 12 October 2026. Status: implemented on the feature branch.
 
+The model's fictional-only evidence restriction below is superseded by [ADR 0005](0005-real-account-ai-chat.md). Saved history remains display-only and separate from model context.
+
 ## Context
 
 The Android chat needs a history drawer and New Chat, with messages surviving app restarts. The AI endpoint's signed correlation IDs expire and hold no messages. The model remains restricted to fictional evidence and exposes no write tools.
