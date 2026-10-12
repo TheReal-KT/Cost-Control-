@@ -1,18 +1,25 @@
 package com.example.agentcostcontrol.ui;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.TextView;
+import androidx.appcompat.widget.AppCompatImageButton;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 
 import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.model.Budget;
 import com.example.agentcostcontrol.model.Reminder;
 import com.example.agentcostcontrol.model.Subscription;
+import com.google.android.material.button.MaterialButton;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -34,15 +41,16 @@ public final class HomeScreen {
                               List<Reminder> reminders, Map<String, BigDecimal> monthlySpend,
                               int activeCount, boolean totalsComplete, Actions actions) {
         LinearLayout page = Ui.page(context);
-        page.addView(Ui.heading(context, "Monthly spend"));
+        page.addView(Ui.text(context, "Monthly spend", 15,
+                Ui.color(context, R.color.text_secondary), false));
 
         if (monthlySpend.isEmpty()) {
+            addSpendAmount(context, page, BigDecimal.ZERO, "");
             page.addView(Ui.text(context, "No active services.", 15,
                     Ui.color(context, R.color.text_secondary), false), margin(context, 0, 8, 0, 12));
         } else {
             for (Map.Entry<String, BigDecimal> total : monthlySpend.entrySet()) {
-                page.addView(Ui.text(context, MoneyText.format(total.getValue(), total.getKey()), 30,
-                        Ui.color(context, R.color.text_primary), true), margin(context, 0, 6, 0, 0));
+                addSpendAmount(context, page, total.getValue(), total.getKey());
             }
         }
         if (activeCount > 0) {
@@ -52,6 +60,59 @@ public final class HomeScreen {
         if (!totalsComplete) {
             page.addView(Ui.secondary(context, "Totals include the first 1,000 services."),
                     margin(context, 0, 4, 0, 0));
+        }
+
+        LinearLayout quickActions = Ui.row(context);
+        addQuickAction(context, quickActions, "Add service", R.drawable.ic_action_add, actions::onAddService);
+        addQuickAction(context, quickActions, "Reminder", R.drawable.ic_nav_reminders, actions::onAddReminder);
+        addQuickAction(context, quickActions, "Services", R.drawable.ic_nav_services, actions::onOpenServices);
+        page.addView(quickActions, margin(context, 0, 26, 0, 26));
+
+        LinearLayout servicesHeading = Ui.row(context);
+        servicesHeading.addView(Ui.section(context, context.getString(R.string.home_services)),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        MaterialButton seeServices = Ui.textButton(context, "See all");
+        seeServices.setStrokeWidth(0);
+        seeServices.setTextColor(Ui.color(context, R.color.brand_blue));
+        seeServices.setOnClickListener(view -> actions.onOpenServices());
+        servicesHeading.addView(seeServices);
+        page.addView(servicesHeading);
+        List<Subscription> preview = new ArrayList<>(subscriptions);
+        preview.sort(Comparator.comparing(Subscription::getRenewalDate).thenComparing(Subscription::getName));
+        if (preview.isEmpty()) {
+            page.addView(Ui.secondary(context, context.getString(R.string.home_services_empty)),
+                    margin(context, 0, 14, 0, 4));
+        }
+        for (int i = 0; i < Math.min(5, preview.size()); i++) {
+            Subscription subscription = preview.get(i);
+            LinearLayout row = Ui.row(context);
+            ServiceBrand.prepend(context, row, subscription.getName());
+            LinearLayout copy = Ui.column(context);
+            copy.setPadding(0, Ui.dp(context, 14), Ui.dp(context, 10), Ui.dp(context, 14));
+            copy.addView(Ui.text(context, subscription.getName(), 16,
+                    Ui.color(context, R.color.text_primary), true));
+            copy.addView(Ui.secondary(context, subscription.getStatus()
+                    == com.example.agentcostcontrol.model.SubscriptionStatus.ACTIVE
+                    ? "Renews " + subscription.getRenewalDate()
+                    : ServicesScreen.titleCase(subscription.getStatus().name())), margin(context, 0, 3, 0, 0));
+            row.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            LinearLayout price = Ui.column(context);
+            price.setGravity(Gravity.END);
+            price.addView(Ui.text(context, MoneyText.format(subscription.getPrice(), subscription.getCurrency()),
+                    15, Ui.color(context, R.color.text_primary), false));
+            price.addView(Ui.secondary(context, subscription.getBillingCycle().name()
+                    .toLowerCase(java.util.Locale.ROOT)), margin(context, 0, 3, 0, 0));
+            row.addView(price);
+            row.setMinimumHeight(Ui.dp(context, 76));
+            row.setFocusable(true);
+            row.setContentDescription(subscription.getName() + ", "
+                    + MoneyText.format(subscription.getPrice(), subscription.getCurrency()) + ", "
+                    + subscription.getBillingCycle().name().toLowerCase(java.util.Locale.ROOT) + ", "
+                    + ServicesScreen.titleCase(subscription.getStatus().name()) + ", renewal "
+                    + subscription.getRenewalDate());
+            row.setOnClickListener(view -> actions.onOpenService(subscription));
+            page.addView(row);
+            page.addView(Ui.divider(context), new LinearLayout.LayoutParams(-1, Ui.dp(context, 1)));
         }
 
         addRule(context, page, 24);
@@ -78,6 +139,8 @@ public final class HomeScreen {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         renewalsHeading.addView(Ui.textButton(context, "See all"), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        ((MaterialButton) renewalsHeading.getChildAt(1)).setStrokeWidth(0);
+        ((MaterialButton) renewalsHeading.getChildAt(1)).setTextColor(Ui.color(context, R.color.brand_blue));
         renewalsHeading.getChildAt(1).setOnClickListener(view -> actions.onOpenReminders());
         page.addView(renewalsHeading);
 
@@ -89,6 +152,7 @@ public final class HomeScreen {
             page.addView(Ui.secondary(context, "No upcoming renewals."), margin(context, 0, 10, 0, 0));
         } else {
             LinearLayout row = Ui.row(context);
+            ServiceBrand.prepend(context, row, nextSubscription.getName());
             LinearLayout copy = Ui.column(context);
             copy.addView(Ui.text(context, nextSubscription.getName(), 15,
                     Ui.color(context, R.color.text_primary), true));
@@ -119,23 +183,37 @@ public final class HomeScreen {
             page.getChildAt(page.getChildCount() - 1).setOnClickListener(view -> actions.onOpenReminder(upcomingReminder));
         }
 
-        addRule(context, page, 22);
-        LinearLayout buttons = Ui.row(context);
-        com.google.android.material.button.MaterialButton addService = Ui.button(context, "Add service", true);
-        addService.setOnClickListener(view -> actions.onAddService());
-        buttons.addView(addService, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        com.google.android.material.button.MaterialButton addReminder = Ui.button(context, "Add reminder", false);
-        addReminder.setOnClickListener(view -> actions.onAddReminder());
-        LinearLayout.LayoutParams reminderParams = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        reminderParams.setMarginStart(Ui.dp(context, 10));
-        buttons.addView(addReminder, reminderParams);
-        page.addView(buttons);
-        com.google.android.material.button.MaterialButton allServices = Ui.textButton(context, "All services");
-        allServices.setOnClickListener(view -> actions.onOpenServices());
-        page.addView(allServices, margin(context, 0, 12, 0, 0));
-
         return Ui.scroll(context, page);
+    }
+
+    private static void addSpendAmount(Context context, LinearLayout page, BigDecimal total, String currency) {
+        TextView amount = Ui.text(context, MoneyText.format(total, currency).trim(), 38,
+                Ui.color(context, R.color.text_primary), true);
+        amount.setLetterSpacing(-.03f);
+        page.addView(amount, margin(context, 0, 6, 0, 0));
+    }
+
+    private static void addQuickAction(Context context, LinearLayout row, String label, int icon, Runnable action) {
+        LinearLayout column = Ui.column(context);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        AppCompatImageButton button = new AppCompatImageButton(context);
+        button.setContentDescription(label);
+        button.setImageResource(icon);
+        button.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.color(context, R.color.brand_blue_on)));
+        button.setPadding(Ui.dp(context, 14), Ui.dp(context, 14), Ui.dp(context, 14), Ui.dp(context, 14));
+        button.setMinimumWidth(0);
+        button.setMinimumHeight(0);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(Ui.color(context, R.color.brand_blue));
+        button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(0x26000000), circle, null));
+        button.setOnClickListener(view -> action.run());
+        column.addView(button, new LinearLayout.LayoutParams(Ui.dp(context, 52), Ui.dp(context, 52)));
+        TextView caption = Ui.text(context, label, 12, Ui.color(context, R.color.text_primary), false);
+        caption.setGravity(Gravity.CENTER);
+        caption.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        column.addView(caption, margin(context, 0, 8, 0, 0));
+        row.addView(column, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
     }
 
     private static Subscription findSubscription(List<Subscription> subscriptions, long id) {

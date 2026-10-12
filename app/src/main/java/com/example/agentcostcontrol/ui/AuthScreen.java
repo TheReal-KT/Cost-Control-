@@ -1,10 +1,12 @@
 package com.example.agentcostcontrol.ui;
 
 import android.content.Context;
+import android.animation.ValueAnimator;
 import android.os.Bundle;
 import android.util.Patterns;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -39,7 +41,22 @@ public final class AuthScreen extends LinearLayout {
         this.mode = mode;
         this.actions = actions;
         setOrientation(VERTICAL);
-        setPadding(Ui.dp(context, 24), Ui.dp(context, 24), Ui.dp(context, 24), Ui.dp(context, 32));
+        setPadding(Ui.dp(context, 24), Ui.dp(context, 8), Ui.dp(context, 24), Ui.dp(context, 24));
+
+        if (mode != Mode.PROFILE_SETUP) {
+            addView(new AuthHeroView(context), new LayoutParams(LayoutParams.MATCH_PARENT,
+                    Ui.dp(context, mode == Mode.SIGN_IN ? 120 : 60)));
+        }
+        TextView title = Ui.heading(context, context.getString(mode == Mode.SIGN_IN
+                ? R.string.auth_sign_in_heading : mode == Mode.CREATE_ACCOUNT
+                ? R.string.auth_create_heading : R.string.auth_profile_heading));
+        title.setTextSize(32);
+        title.setLetterSpacing(-.025f);
+        addView(title, margin(context, 0, 8, 0, 8));
+        addView(Ui.text(context, context.getString(mode == Mode.SIGN_IN
+                ? R.string.auth_sign_in_intro : mode == Mode.CREATE_ACCOUNT
+                ? R.string.auth_create_intro : R.string.auth_profile_intro), 15,
+                Ui.color(context, R.color.text_secondary), false), margin(context, 0, 0, 0, 22));
 
         messageView = Ui.text(context, "", 14, Ui.color(context, R.color.brand_blue), false);
         messageView.setVisibility(View.GONE);
@@ -78,6 +95,7 @@ public final class AuthScreen extends LinearLayout {
         MaterialButton primary = Ui.button(context, mode == Mode.SIGN_IN ? "Sign in"
                 : mode == Mode.CREATE_ACCOUNT ? "Create account" : "Finish setup", true);
         primary.setId(R.id.auth_primary_action);
+        primary.setMinHeight(Ui.dp(context, 56));
         primary.setOnClickListener(view -> submit());
         addView(primary, margin(context, 0, 8, 0, 8));
         if (mode == Mode.SIGN_IN) {
@@ -91,6 +109,31 @@ public final class AuthScreen extends LinearLayout {
             signIn.setOnClickListener(view -> actions.onOpenSignIn());
             addView(signIn, margin(context, 0, 0, 0, 0));
         }
+    }
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (!ValueAnimator.areAnimatorsEnabled()) return;
+        // A short, finite reveal leaves controls usable and doesn't replay on field focus.
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child instanceof AuthHeroView || child.getVisibility() == View.GONE) continue;
+            child.setAlpha(0f);
+            child.setTranslationY(Ui.dp(getContext(), 14));
+            child.animate().alpha(1f).translationY(0f).setDuration(280)
+                    .setStartDelay(Math.min(i * 65L, 260L))
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            child.animate().cancel();
+            child.setAlpha(1f);
+            child.setTranslationY(0f);
+        }
+        super.onDetachedFromWindow();
     }
 
     public Bundle state() {

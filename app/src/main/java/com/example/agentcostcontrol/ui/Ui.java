@@ -130,10 +130,16 @@ public final class Ui {
         container.setBoxCornerRadii(dp(context, 12), dp(context, 12), dp(context, 12), dp(context, 12));
         container.setBoxStrokeColor(color(context, R.color.card_outline));
         container.setHintTextColor(ColorStateList.valueOf(color(context, R.color.text_secondary)));
+        container.setBoxBackgroundColor(color(context, R.color.surface_raised));
 
         TextInputEditText editText = new TextInputEditText(context);
+        // TextInputLayout owns the outline; the platform underline would otherwise take precedence.
+        editText.setBackground(null);
+        editText.setMinHeight(dp(context, 56));
+        editText.setPadding(dp(context, 16), dp(context, 16), dp(context, 16), dp(context, 16));
         editText.setInputType(inputType);
         editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        editText.setTextColor(color(context, R.color.text_primary));
         editText.setSingleLine(inputType != (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE));
         if (value != null) editText.setText(value);
         container.addView(editText, new TextInputLayout.LayoutParams(
@@ -152,6 +158,8 @@ public final class Ui {
         container.setEndIconMode(TextInputLayout.END_ICON_DROPDOWN_MENU);
 
         AutoCompleteTextView input = new AutoCompleteTextView(context);
+        input.setBackground(null);
+        input.setTextColor(color(context, R.color.text_primary));
         input.setInputType(InputType.TYPE_NULL);
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         input.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_list_item_1, values));
@@ -164,7 +172,7 @@ public final class Ui {
 
     public static MaterialCardView card(Context context, View content) {
         MaterialCardView card = new MaterialCardView(context);
-        card.setCardBackgroundColor(color(context, R.color.surface));
+        card.setCardBackgroundColor(color(context, R.color.surface_raised));
         card.setStrokeColor(color(context, R.color.card_outline));
         card.setStrokeWidth(dp(context, 1));
         card.setCardElevation(0);
@@ -177,6 +185,7 @@ public final class Ui {
     public static View divider(Context context) {
         View divider = new View(context);
         divider.setBackgroundColor(color(context, R.color.card_outline));
+        divider.setMinimumHeight(dp(context, 1));
         return divider;
     }
 

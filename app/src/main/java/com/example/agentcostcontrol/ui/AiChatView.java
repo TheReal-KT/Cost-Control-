@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
@@ -50,7 +51,13 @@ public final class AiChatView extends LinearLayout {
         messages = findViewById(R.id.chat_messages);
         scroll = findViewById(R.id.chat_scroll);
         send = findViewById(R.id.chat_send);
-        MaterialButton model = findViewById(R.id.chat_model);
+        View model = findViewById(R.id.chat_model);
+        model.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(android.widget.Button.class.getName());
+            }
+        });
         model.setOnClickListener(view -> {
             PopupMenu menu = new PopupMenu(context, model);
             menu.getMenu().add(R.string.chat_model_full).setCheckable(true).setChecked(true);

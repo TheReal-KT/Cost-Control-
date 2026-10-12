@@ -95,6 +95,8 @@ class OpenRouterExplanation:
                 {"role": "user", "content": json.dumps({"task": task.value, "evidence": evidence})},
             ],
             "max_tokens": 400,
+            # Reasoning shares this budget; leave room for the short, visible explanation.
+            "reasoning": {"enabled": False},
             "provider": {"allow_fallbacks": False},
         }
         try:

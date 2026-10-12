@@ -116,6 +116,8 @@ class ApiContracts(unittest.TestCase):
         self.assertNotIn(CONFIG.publishable_key, wire)
         body = json.loads(wire)
         self.assertEqual(MODEL_ID, body["model"])
+        self.assertEqual(400, body["max_tokens"])
+        self.assertEqual({"enabled": False}, body["reasoning"])
         self.assertFalse(body["provider"]["allow_fallbacks"])
         self.assertNotIn("models", body)
         self.assertNotIn("response_format", body)
@@ -263,6 +265,20 @@ class ApiContracts(unittest.TestCase):
             with self.subTest(data=data):
                 self.upstreams.provider_data = data
                 self.assertEqual(502, self.ask().status_code)
+
+    def test_reasoning_only_truncated_answer_is_rejected(self):
+        self.upstreams.provider_data = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning": "The output budget was spent thinking.",
+                    },
+                }
+            ]
+        }
+        self.assertEqual(502, self.ask().status_code)
 
     def test_provider_response_byte_bound_and_invalid_json(self):
         for data in (b"x" * 65537, b"invalid json", b"[]"):

@@ -1,17 +1,17 @@
 <resources>
-    <color name="app_background">#FFFFFF</color>
-    <color name="surface">#FFFFFF</color>
-    <color name="surface_raised">#F5F8FC</color>
-    <color name="brand_blue">#155EEF</color>
-    <color name="brand_blue_pressed">#0E49C7</color>
-    <color name="brand_blue_soft">#EAF1FF</color>
-    <color name="brand_blue_on">#FFFFFF</color>
-    <color name="hero_supporting">#E2ECFF</color>
-    <color name="text_primary">#142033</color>
-    <color name="text_secondary">#59677A</color>
-    <color name="card_outline">#DCE3ED</color>
-    <color name="positive">#16794A</color>
-    <color name="caution">#8A5700</color>
-    <color name="danger">#B42318</color>
-    <color name="nav_selected_text">#155EEF</color>
+    <color name="app_background">#0B0D10</color>
+    <color name="surface">#0B0D10</color>
+    <color name="surface_raised">#191D24</color>
+    <color name="brand_blue">#578BFF</color>
+    <color name="brand_blue_pressed">#3971EB</color>
+    <color name="brand_blue_soft">#16284A</color>
+    <color name="brand_blue_on">#071327</color>
+    <color name="hero_supporting">#D6E4FF</color>
+    <color name="text_primary">#F5F7FA</color>
+    <color name="text_secondary">#A1A9B7</color>
+    <color name="card_outline">#2A303A</color>
+    <color name="positive">#6ED9A5</color>
+    <color name="caution">#F4C16B</color>
+    <color name="danger">#FF8981</color>
+    <color name="nav_selected_text">#578BFF</color>
 </resources>

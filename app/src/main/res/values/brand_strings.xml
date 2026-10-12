@@ -1,0 +1,11 @@
+<resources>
+    <string name="auth_sign_in_heading">Your subscriptions.\nUnder control.</string>
+    <string name="auth_sign_in_intro">Sign in to keep your costs and renewals in view.</string>
+    <string name="auth_create_heading">Make room for\nwhat matters.</string>
+    <string name="auth_create_intro">Create your account to start tracking your services.</string>
+    <string name="auth_profile_heading">Let’s make\nthis yours.</string>
+    <string name="auth_profile_intro">Add your name to finish setting up your account.</string>
+    <string name="home_services">Your services</string>
+    <string name="home_services_empty">Add your first service to see its cost and renewal here.</string>
+    <string name="chat_empty">A clearer view of\nyour subscriptions.</string>
+</resources>

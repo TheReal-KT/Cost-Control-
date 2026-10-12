@@ -25,10 +25,12 @@
                 android:id="@+id/chat_empty"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingTop="36dp"
+                android:paddingTop="60dp"
                 android:text="@string/chat_empty"
-                android:textColor="@color/text_secondary"
-                android:textSize="20sp" />
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:letterSpacing="-0.02"
+                android:textSize="30sp" />
         </LinearLayout>
     </ScrollView>
 
@@ -47,7 +49,7 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
         app:cardCornerRadius="20dp"
-        app:cardBackgroundColor="@color/surface"
+        app:cardBackgroundColor="@color/surface_raised"
         app:cardElevation="0dp"
         app:strokeWidth="1dp"
         app:strokeColor="@color/card_outline">
@@ -77,22 +79,45 @@
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
-                <com.google.android.material.button.MaterialButton
+                <LinearLayout
                     android:id="@+id/chat_model"
-                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:minHeight="48dp"
                     android:contentDescription="@string/chat_model_selector"
-                    android:text="@string/chat_model_short"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="horizontal"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="12dp"
                     android:gravity="start|center_vertical"
-                    android:textAllCaps="false"
-                    android:textSize="14sp"
-                    app:icon="@drawable/ic_model_dropdown"
-                    app:iconGravity="end"
-                    app:iconSize="16dp"
-                    app:iconTint="@color/brand_blue" />
+                    >
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_brand_nvidia" />
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:importantForAccessibility="no"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="@string/chat_model_short"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_marginStart="4dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_model_dropdown"
+                        app:tint="@color/text_secondary" />
+                </LinearLayout>
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/chat_send"
                     android:layout_width="wrap_content"
