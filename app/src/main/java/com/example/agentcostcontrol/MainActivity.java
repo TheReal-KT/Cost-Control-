@@ -202,6 +202,9 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout screenContainer;
     private TextView screenTitle;
     private BottomNavigationView bottomNavigation;
+    private boolean bottomNavigationAllowed;
+    private boolean chatScreenVisible;
+    private boolean keyboardVisible;
     private View currentContent;
     private AuthScreen authScreen;
     private SubscriptionForm subscriptionForm;
@@ -256,8 +259,10 @@ public class MainActivity extends AppCompatActivity {
             Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-            boolean imeVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
-            view.setPadding(0, bars.top, 0, Math.max(bars.bottom, imeVisible ? ime.bottom : 0));
+            keyboardVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
+            view.setPadding(bars.left, bars.top, bars.right,
+                    Math.max(bars.bottom, keyboardVisible ? ime.bottom : 0));
+            updateBottomNavigationVisibility();
             return windowInsets;
         });
         ViewCompat.requestApplyInsets(root);
@@ -1137,7 +1142,11 @@ public class MainActivity extends AppCompatActivity {
             if (aiChatView == null) {
                 aiChatView = new AiChatView(this);
                 aiChatView.setHistoryRepository(repository);
-                aiChatView.setOnConversationStateChangedListener(started -> updateAiTabsVisibility());
+                aiChatView.setOnOpenInsightsListener(() -> {
+                    WindowCompat.getInsetsController(getWindow(), screenContainer)
+                            .hide(WindowInsetsCompat.Type.ime());
+                    aiTabs.check(R.id.ai_insights_tab);
+                });
                 aiChatView.setAccessToken(session == null ? null : session.getAccessToken());
                 aiChatView.restoreState(chatState);
                 chatState = null;
@@ -1168,9 +1177,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateAiTabsVisibility() {
         if (aiTabs == null) return;
-        boolean focusedChat = aiSubview == AiSubview.CHAT && aiChatView != null
-                && aiChatView.hasStartedConversation();
-        aiTabs.setVisibility(focusedChat ? View.GONE : View.VISIBLE);
+        aiTabs.setVisibility(aiSubview == AiSubview.CHAT ? View.GONE : View.VISIBLE);
     }
 
     private void createAiRoot() {
@@ -1780,7 +1787,16 @@ public class MainActivity extends AppCompatActivity {
 
     private void setChrome(String title, boolean showBottomNav) {
         screenTitle.setText(title);
-        bottomNavigation.setVisibility(showBottomNav ? View.VISIBLE : View.GONE);
+        bottomNavigationAllowed = showBottomNav;
+        chatScreenVisible = showBottomNav && authMode == null && rootScreen == RootScreen.AI
+                && aiSubview == AiSubview.CHAT && routes.isEmpty();
+        findViewById(R.id.app_header).setVisibility(chatScreenVisible ? View.GONE : View.VISIBLE);
+        updateBottomNavigationVisibility();
+    }
+
+    private void updateBottomNavigationVisibility() {
+        boolean visible = bottomNavigationAllowed && !(chatScreenVisible && keyboardVisible);
+        bottomNavigation.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
     private String currentTitle() {

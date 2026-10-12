@@ -62,6 +62,68 @@ import static org.junit.Assert.assertTrue;
 @RunWith(AndroidJUnit4.class)
 public final class ChatAndAuthTest {
     @Test
+    public void chatIntroducesColeAndKeepsInsightsAndNewChatAccessible() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Context context = new ContextThemeWrapper(
+                    InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                    R.style.Theme_AgentCostControl);
+            AiChatView chat = new AiChatView(context);
+            try {
+                assertEquals("Hi, I’m Cole.", ((TextView) chat.findViewById(R.id.chat_empty))
+                        .getText().toString());
+                AtomicInteger opened = new AtomicInteger();
+                chat.setOnOpenInsightsListener(opened::incrementAndGet);
+                chat.findViewById(R.id.chat_open_insights).performClick();
+                assertEquals(1, opened.get());
+                assertEquals("New chat", chat.findViewById(R.id.chat_new)
+                        .getContentDescription().toString());
+            } finally {
+                chat.dispose();
+            }
+        });
+    }
+
+    @Test
+    public void restoredMessagesHaveNoVisibleSpeakerTagsButRetainScreenReaderContext() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Context context = new ContextThemeWrapper(
+                    InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                    R.style.Theme_AgentCostControl);
+            Bundle state = new Bundle();
+            state.putString("conversation_id", UUID.randomUUID().toString());
+            state.putString("conversation_title", "Sample chat");
+            state.putBoolean("started", true);
+            state.putStringArrayList("turn_ids", new ArrayList<>(
+                    Collections.singletonList(UUID.randomUUID().toString())));
+            state.putStringArrayList("turn_questions", new ArrayList<>(Collections.singletonList("Hello")));
+            state.putStringArrayList("turn_answers", new ArrayList<>(Collections.singletonList("Welcome")));
+            state.putBooleanArray("turn_complete", new boolean[]{true});
+            state.putBooleanArray("turn_persisted", new boolean[]{true});
+            state.putBooleanArray("turn_save_failed", new boolean[]{false});
+            AiChatView chat = new AiChatView(context);
+            try {
+                chat.restoreState(state);
+                ViewGroup messages = chat.findViewById(R.id.chat_turns);
+                assertEquals(2, messages.getChildCount());
+                String[] expected = {"Hello", "Welcome"};
+                String[] speakers = {"You", "Assistant"};
+                for (int index = 0; index < 2; index++) {
+                    ViewGroup row = (ViewGroup) messages.getChildAt(index);
+                    assertEquals("Only the message body should be visible", 1, row.getChildCount());
+                    TextView body = (TextView) row.getChildAt(0);
+                    assertEquals(expected[index], body.getText().toString());
+                    android.view.accessibility.AccessibilityNodeInfo node = body.createAccessibilityNodeInfo();
+                    assertEquals(speakers[index] + ": " + expected[index],
+                            node.getContentDescription().toString());
+                    node.recycle();
+                }
+            } finally {
+                chat.dispose();
+            }
+        });
+    }
+
+    @Test
     public void signedOutUserCannotOpenProtectedTabs() {
         // Run on a fresh emulator installation without an existing signed-in session.
         try (ActivityScenario<MainActivity> ignored = ActivityScenario.launch(MainActivity.class)) {

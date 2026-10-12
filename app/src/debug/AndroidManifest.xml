@@ -3,12 +3,7 @@
     <application>
         <activity
             android:name=".preview.SubscriptionPreviewActivity"
-            android:exported="true"
-            android:label="Cost Control Preview">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:label="Cost Control Preview" />
     </application>
 </manifest>

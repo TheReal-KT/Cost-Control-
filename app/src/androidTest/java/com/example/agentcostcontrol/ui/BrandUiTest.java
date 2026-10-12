@@ -36,12 +36,25 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNull;
 
 @RunWith(AndroidJUnit4.class)
 public final class BrandUiTest {
+    @Test public void onlyTheRealApplicationHasALauncherEntry() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        android.content.pm.PackageManager packages = context.getPackageManager();
+        android.content.Intent launcher = new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(context.getPackageName());
+        List<android.content.pm.ResolveInfo> entries = packages.queryIntentActivities(launcher, 0);
+        assertEquals(1, entries.size());
+        assertEquals(com.example.agentcostcontrol.MainActivity.class.getName(), entries.get(0).activityInfo.name);
+        assertFalse(packages.getActivityInfo(new android.content.ComponentName(context,
+                SubscriptionPreviewActivity.class), 0).exported);
+    }
+
     @Test public void homeKeepsSpendVisibleForEmptyAccountsAndRoutesActionsToTheirDestination() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             Context context = themedContext(1f);
