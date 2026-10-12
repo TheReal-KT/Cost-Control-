@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from uuid import UUID
@@ -10,6 +11,7 @@ import httpx
 
 from .contracts import MODEL_ID
 from .evidence import AnalysisTask
+from .streaming import event_data
 
 
 class RemoteFailure(Exception):
@@ -78,8 +80,8 @@ class OpenRouterExplanation:
     def __init__(self, client: httpx.AsyncClient, key: str) -> None:
         self._client, self._key = client, key
 
-    async def explain(self, task: AnalysisTask, evidence: dict) -> str:
-        request = {
+    def _request(self, task: AnalysisTask, evidence: dict) -> dict:
+        return {
             "model": MODEL_ID,
             "messages": [
                 {
@@ -98,7 +100,12 @@ class OpenRouterExplanation:
             # Reasoning shares this budget; leave room for the short, visible explanation.
             "reasoning": {"enabled": False},
             "provider": {"allow_fallbacks": False},
+            # There is no account-action executor. Do not let a model choose any tools.
+            "tool_choice": "none",
         }
+
+    async def stream_explain(self, task: AnalysisTask, evidence: dict) -> AsyncIterator[str]:
+        request = {**self._request(task, evidence), "stream": True}
         try:
             async with self._client.stream(
                 "POST",
@@ -107,11 +114,82 @@ class OpenRouterExplanation:
                 json=request,
                 timeout=25,
             ) as response:
-                if response.status_code == 429:
-                    seconds = retry_delay(response.headers.get("retry-after", "60"))
-                    raise RemoteFailure(429, "AI request limit reached", seconds)
-                if response.status_code != 200:
-                    raise RemoteFailure(502, "AI provider unavailable")
+                self._check_status(response)
+                if not response.headers.get("content-type", "").startswith("text/event-stream"):
+                    raise RemoteFailure(502, "Invalid AI stream")
+                text = ""
+                finished = False
+                async for raw in event_data(response):
+                    if raw == "[DONE]":
+                        if not finished or not text.strip():
+                            raise RemoteFailure(502, "Incomplete AI answer")
+                        return
+                    data = json.loads(raw)
+                    if not isinstance(data, dict) or "error" in data:
+                        raise RemoteFailure(502, "AI stream failed")
+                    choices = data.get("choices")
+                    if choices == [] and isinstance(data.get("usage"), dict):
+                        continue
+                    if not isinstance(choices, list) or len(choices) != 1:
+                        raise RemoteFailure(502, "Invalid AI stream")
+                    choice = choices[0]
+                    if not isinstance(choice, dict) or choice.get("index", 0) != 0:
+                        raise RemoteFailure(502, "Invalid AI stream")
+                    delta = choice.get("delta")
+                    if (
+                        not isinstance(delta, dict)
+                        or delta.get("tool_calls")
+                        or delta.get("function_call")
+                    ):
+                        raise RemoteFailure(502, "AI tools are unavailable")
+                    content = delta.get("content")
+                    if finished:
+                        # OpenRouter may repeat the terminal choice in its usage frame.
+                        if (
+                            isinstance(data.get("usage"), dict)
+                            and content in (None, "")
+                            and choice.get("finish_reason") == "stop"
+                        ):
+                            continue
+                        raise RemoteFailure(502, "Invalid AI stream")
+                    if content is not None:
+                        if not isinstance(content, str) or len(text) + len(content) > 4000:
+                            raise RemoteFailure(502, "Invalid AI answer")
+                        text += content
+                        if content:
+                            yield content
+                    reason = choice.get("finish_reason")
+                    if reason is not None:
+                        if reason != "stop":
+                            raise RemoteFailure(502, "Incomplete AI answer")
+                        finished = True
+                raise RemoteFailure(502, "Incomplete AI answer")
+        except httpx.TimeoutException as error:
+            raise RemoteFailure(504, "AI provider timed out") from error
+        except httpx.HTTPError as error:
+            raise RemoteFailure(502, "AI provider unavailable") from error
+        except (ValueError, UnicodeError, TypeError) as error:
+            raise RemoteFailure(502, "Invalid AI stream") from error
+
+    @staticmethod
+    def _check_status(response: httpx.Response) -> None:
+        if response.status_code == 429:
+            seconds = retry_delay(response.headers.get("retry-after", "60"))
+            raise RemoteFailure(429, "AI request limit reached", seconds)
+        if response.status_code != 200:
+            raise RemoteFailure(502, "AI provider unavailable")
+
+    async def explain(self, task: AnalysisTask, evidence: dict) -> str:
+        request = self._request(task, evidence)
+        try:
+            async with self._client.stream(
+                "POST",
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self._key}"},
+                json=request,
+                timeout=25,
+            ) as response:
+                self._check_status(response)
                 data = await bounded_json(response)
             # Never accept partial generations, tool calls, or reasoning in place of a final answer.
             choices = data.get("choices")
@@ -123,6 +201,7 @@ class OpenRouterExplanation:
                 not isinstance(message, dict)
                 or choice.get("finish_reason") != "stop"
                 or message.get("tool_calls")
+                or message.get("function_call")
             ):
                 raise RemoteFailure(502, "Invalid AI answer")
             content = message.get("content")

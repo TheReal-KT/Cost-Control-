@@ -1,21 +1,24 @@
 """Small single-worker API for authenticated, synthetic-only AI analysis."""
 
 import asyncio
+import json
 import logging
 import time
 from collections import deque
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from contextlib import aclosing, asynccontextmanager
 from uuid import UUID, uuid4
 
+import anyio
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .adapters import OpenRouterExplanation, RemoteFailure, SupabaseIdentity
 from .contracts import ChatReply, ChatRequest
-from .evidence import select_task
+from .evidence import AnalysisTask, select_task
 from .security import ConversationIds, Settings
 from .workflow import build_graph
 
@@ -120,6 +123,42 @@ async def run_until_disconnect(request: Request, graph, task):
         await asyncio.gather(run, monitor, return_exceptions=True)
 
 
+async def graph_deltas(graph, task: AnalysisTask) -> AsyncIterator[dict[str, str]]:
+    """Keep graph cancellation/cleanup outside Starlette's repeatedly cancelled scope."""
+    queue: asyncio.Queue[dict[str, str] | Exception | None] = asyncio.Queue(maxsize=1)
+
+    async def produce():
+        try:
+            async with aclosing(
+                graph.astream(
+                    {"task": task, "streaming": True},
+                    {"recursion_limit": 5},
+                    stream_mode="custom",
+                )
+            ) as parts:
+                async for part in parts:
+                    await queue.put(part)
+        except Exception as error:
+            await queue.put(error)
+        else:
+            await queue.put(None)
+
+    producer = asyncio.create_task(produce())
+    try:
+        while True:
+            part = await queue.get()
+            if part is None:
+                return
+            if isinstance(part, Exception):
+                raise part
+            yield part
+    finally:
+        producer.cancel()
+        # Join the graph so its outbound response is closed before releasing admission.
+        with anyio.CancelScope(shield=True):
+            await asyncio.gather(producer, return_exceptions=True)
+
+
 def create_app(
     settings: Settings | None = None, transport: httpx.AsyncBaseTransport | None = None
 ) -> FastAPI:
@@ -157,28 +196,39 @@ def create_app(
             "data_mode": "synthetic",
         }
 
+    def require_token(request: Request) -> str:
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        if scheme.casefold() != "bearer" or not token or len(token) > 8192:
+            raise RemoteFailure(401, "Sign in again")
+        if not app.state.settings.configured:
+            raise RemoteFailure(503, "Chat is not configured")
+        return token
+
+    async def prepare_chat(payload: ChatRequest, token: str) -> tuple[AnalysisTask | None, str]:
+        owner = await app.state.identity.verify(token)
+        conversations = app.state.conversations
+        if payload.conversation_id is not None:
+            if not conversations.verify(payload.conversation_id, owner):
+                raise RemoteFailure(404, "Conversation unavailable")
+            conversation = payload.conversation_id
+        else:
+            conversation = conversations.issue(owner)
+        task = select_task(payload.prompt)
+        if task is not None:
+            app.state.budget.reserve_call(owner)
+        return task, conversation
+
     @app.post("/ai/chat", response_model=ChatReply)
     async def chat(payload: ChatRequest, request: Request):
+        if payload.stream:
+            return await stream_chat(payload, request)
         started = time.monotonic()
         request_id = uuid4().hex
         status = 200
         try:
-            authorization = request.headers.get("authorization", "")
-            scheme, _, token = authorization.partition(" ")
-            if scheme.casefold() != "bearer" or not token or len(token) > 8192:
-                raise RemoteFailure(401, "Sign in again")
-            if not app.state.settings.configured:
-                raise RemoteFailure(503, "Chat is not configured")
+            token = require_token(request)
             async with app.state.budget.admit(), asyncio.timeout(38):
-                owner = await app.state.identity.verify(token)
-                conversations = app.state.conversations
-                if payload.conversation_id is not None:
-                    if not conversations.verify(payload.conversation_id, owner):
-                        raise RemoteFailure(404, "Conversation unavailable")
-                    conversation = payload.conversation_id
-                else:
-                    conversation = conversations.issue(owner)
-                task = select_task(payload.prompt)
+                task, conversation = await prepare_chat(payload, token)
                 if task is None:
                     return ChatReply(
                         answer=(
@@ -187,7 +237,6 @@ def create_app(
                         ),
                         conversation_id=conversation,
                     )
-                app.state.budget.reserve_call(owner)
                 result = await run_until_disconnect(request, app.state.graph, task)
                 return ChatReply(answer=result["answer"], conversation_id=conversation)
         except TimeoutError:
@@ -220,5 +269,91 @@ def create_app(
                 status,
                 int((time.monotonic() - started) * 1000),
             )
+
+    def event(name: str, data: dict) -> str:
+        return f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
+    async def stream_chat(payload: ChatRequest, request: Request):
+        started = time.monotonic()
+        request_id = uuid4().hex
+        status = 200
+        try:
+            token = require_token(request)
+            async with app.state.budget.admit(), asyncio.timeout(38):
+                task, conversation = await prepare_chat(payload, token)
+        except (RemoteFailure, TimeoutError) as error:
+            status = error.status if isinstance(error, RemoteFailure) else 504
+            detail = error.code if isinstance(error, RemoteFailure) else "AI request timed out"
+            headers = {"X-Request-ID": request_id}
+            if status == 401:
+                headers["WWW-Authenticate"] = "Bearer"
+            if status == 429:
+                headers["Retry-After"] = str(error.retry_after)
+            logger.info(
+                "chat request_id=%s status=%s duration_ms=%d",
+                request_id,
+                status,
+                int((time.monotonic() - started) * 1000),
+            )
+            return JSONResponse({"detail": detail}, status, headers=headers)
+
+        async def body():
+            nonlocal status
+            try:
+                async with (
+                    app.state.budget.admit(),
+                    asyncio.timeout(max(0, 38 - (time.monotonic() - started))),
+                ):
+                    yield event("start", {"conversation_id": conversation})
+                    if task is None:
+                        yield event(
+                            "delta",
+                            {
+                                "text": "Fictional examples only. Ask about "
+                                "spending, renewals, budgets or usage."
+                            },
+                        )
+                    else:
+                        async with aclosing(graph_deltas(app.state.graph, task)) as parts:
+                            async for part in parts:
+                                yield event("delta", {"text": part["text"]})
+                    yield event("done", {"conversation_id": conversation})
+            except TimeoutError:
+                status = 504
+                yield event("error", {"status": status, "detail": "AI request timed out"})
+            except RemoteFailure as error:
+                status = error.status
+                yield event(
+                    "error",
+                    {"status": status, "detail": error.code, "retry_after": error.retry_after},
+                )
+            except asyncio.CancelledError:
+                status = 499
+                raise
+            except Exception as error:
+                status = 500
+                logger.error(
+                    "chat unexpected_failure request_id=%s type=%s",
+                    request_id,
+                    type(error).__name__,
+                )
+                yield event("error", {"status": status, "detail": "AI stream failed"})
+            finally:
+                logger.info(
+                    "chat request_id=%s status=%s duration_ms=%d",
+                    request_id,
+                    status,
+                    int((time.monotonic() - started) * 1000),
+                )
+
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+                "X-Request-ID": request_id,
+            },
+        )
 
     return app

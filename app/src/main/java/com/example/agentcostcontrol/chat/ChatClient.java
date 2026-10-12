@@ -13,14 +13,14 @@ import java.nio.charset.StandardCharsets;
 
 /** Calls the authenticated application backend, never the model provider directly. */
 public final class ChatClient {
-    public static final String MODEL_ID = "nvidia/nemotron-3.5-lightning:free";
+    public static final String MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
     private volatile HttpURLConnection activeConnection;
 
     public static final class Reply {
         public final String answer;
         public final String conversationId;
 
-        private Reply(String answer, String conversationId) {
+        Reply(String answer, String conversationId) {
             this.answer = answer;
             this.conversationId = conversationId;
         }
@@ -37,6 +37,21 @@ public final class ChatClient {
 
     public Reply ask(String endpoint, String accessToken, String prompt, String conversationId)
             throws IOException, JSONException, Failure {
+        return request(endpoint, accessToken, prompt, conversationId, null);
+    }
+
+    public interface StreamListener {
+        void onDelta(String text);
+    }
+
+    public Reply askStream(String endpoint, String accessToken, String prompt, String conversationId,
+                           StreamListener listener) throws IOException, JSONException, Failure {
+        return request(endpoint, accessToken, prompt, conversationId,
+                java.util.Objects.requireNonNull(listener));
+    }
+
+    private Reply request(String endpoint, String accessToken, String prompt, String conversationId,
+                          StreamListener listener) throws IOException, JSONException, Failure {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Cancelled");
         URL url = new URL(endpoint);
         if (!"https".equals(url.getProtocol()) || url.getUserInfo() != null) {
@@ -51,11 +66,11 @@ public final class ChatClient {
             connection.setReadTimeout(45_000);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Accept", listener == null ? "application/json" : "text/event-stream");
             connection.setRequestProperty("Authorization", "Bearer " + accessToken);
             connection.setDoOutput(true);
             JSONObject request = new JSONObject().put("prompt", prompt).put("model", MODEL_ID)
-                    .put("data_mode", "synthetic");
+                    .put("data_mode", "synthetic").put("stream", listener != null);
             if (conversationId != null) request.put("conversation_id", conversationId);
             byte[] bytes = request.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(bytes.length);
@@ -64,6 +79,15 @@ public final class ChatClient {
             }
             int status = connection.getResponseCode();
             if (status != HttpURLConnection.HTTP_OK) throw new Failure(status);
+            if (listener != null) {
+                String contentType = connection.getContentType();
+                if (contentType == null || !contentType.startsWith("text/event-stream")) {
+                    throw new IOException("Invalid stream content type");
+                }
+                try (InputStream input = connection.getInputStream()) {
+                    return ChatStreamReader.read(input, listener);
+                }
+            }
             String body;
             try (InputStream input = connection.getInputStream()) {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();

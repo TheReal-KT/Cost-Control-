@@ -40,6 +40,9 @@ public final class AiChatView extends LinearLayout {
     private Future<?> pending;
     private int generation;
     private boolean disposed;
+    private final StringBuilder streamingAnswer = new StringBuilder();
+    private String streamingQuestion;
+    private TextView streamingBody;
 
     public AiChatView(Context context) {
         super(context);
@@ -99,15 +102,25 @@ public final class AiChatView extends LinearLayout {
         String token = accessToken;
         String previousConversation = conversationId;
         prompt.setEnabled(false);
-        send.setText(R.string.chat_stop);
+        setSending(true);
+        streamingQuestion = question;
+        streamingAnswer.setLength(0);
+        renderTranscript();
         showFeedback(R.string.chat_wait);
         pending = worker.submit(() -> {
             try {
-                ChatClient.Reply reply = client.ask(BuildConfig.AI_ENDPOINT_URL, token,
-                        question, previousConversation);
+                ChatClient.Reply reply = client.askStream(BuildConfig.AI_ENDPOINT_URL, token,
+                        question, previousConversation, text -> post(() -> {
+                            if (disposed || requestGeneration != generation) return;
+                            streamingAnswer.append(text);
+                            streamingBody.setText(streamingAnswer.toString());
+                            showFeedback(R.string.chat_streaming);
+                            scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+                        }));
                 post(() -> {
                     if (disposed || requestGeneration != generation) return;
                     conversationId = reply.conversationId;
+                    clearStreaming();
                     transcript.add(question);
                     transcript.add(reply.answer);
                     while (transcript.size() > 20) {
@@ -140,6 +153,7 @@ public final class AiChatView extends LinearLayout {
         post(() -> {
             if (disposed || requestGeneration != generation) return;
             if (clearConversation) conversationId = null;
+            retainIncomplete();
             showFeedback(message);
             idle();
         });
@@ -148,13 +162,14 @@ public final class AiChatView extends LinearLayout {
     private void idle() {
         pending = null;
         prompt.setEnabled(true);
-        send.setText(R.string.chat_send);
+        setSending(false);
     }
 
     private void stop() {
         generation++;
         client.cancel();
         if (pending != null) pending.cancel(true);
+        retainIncomplete();
         feedback.setVisibility(GONE);
         idle();
     }
@@ -167,23 +182,58 @@ public final class AiChatView extends LinearLayout {
     private void renderTranscript() {
         messages.removeAllViews();
         messages.addView(empty);
-        empty.setVisibility(transcript.isEmpty() ? VISIBLE : GONE);
+        empty.setVisibility(transcript.isEmpty() && streamingQuestion == null ? VISIBLE : GONE);
         for (int index = 0; index < transcript.size(); index++) {
-            TextView label = new TextView(getContext());
-            label.setText(index % 2 == 0 ? R.string.chat_you : R.string.chat_assistant);
-            label.setTextColor(getContext().getColor(R.color.text_secondary));
-            label.setTextSize(13);
-            label.setPadding(0, dp(20), 0, dp(6));
-            messages.addView(label);
-            TextView body = new TextView(getContext());
-            body.setText(transcript.get(index));
-            body.setTextColor(getContext().getColor(R.color.text_primary));
-            body.setTextSize(16);
-            body.setTextIsSelectable(true);
-            body.setLineSpacing(dp(3), 1);
-            messages.addView(body);
+            addMessage(index % 2 == 0 ? R.string.chat_you : R.string.chat_assistant,
+                    transcript.get(index));
+        }
+        if (streamingQuestion != null) {
+            addMessage(R.string.chat_you, streamingQuestion);
+            streamingBody = addMessage(R.string.chat_assistant, streamingAnswer.toString());
         }
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private TextView addMessage(int role, String text) {
+        TextView label = new TextView(getContext());
+        label.setText(role);
+        label.setTextColor(getContext().getColor(R.color.text_secondary));
+        label.setTextSize(13);
+        label.setPadding(0, dp(20), 0, dp(6));
+        messages.addView(label);
+        TextView body = new TextView(getContext());
+        body.setText(text);
+        body.setTextColor(getContext().getColor(R.color.text_primary));
+        body.setTextSize(16);
+        body.setTextIsSelectable(true);
+        body.setLineSpacing(dp(3), 1);
+        messages.addView(body);
+        return body;
+    }
+
+    private void setSending(boolean active) {
+        send.setText("");
+        send.setIconResource(active ? R.drawable.ic_chat_stop : R.drawable.ic_chat_send);
+        send.setContentDescription(getContext().getString(active ? R.string.chat_stop : R.string.chat_send));
+    }
+
+    private void clearStreaming() {
+        streamingQuestion = null;
+        streamingAnswer.setLength(0);
+        streamingBody = null;
+    }
+
+    private void retainIncomplete() {
+        if (streamingQuestion != null && streamingAnswer.length() > 0) {
+            transcript.add(streamingQuestion);
+            transcript.add(getContext().getString(R.string.chat_incomplete) + "\n\n" + streamingAnswer);
+            while (transcript.size() > 20) {
+                transcript.remove(0);
+                transcript.remove(0);
+            }
+        }
+        clearStreaming();
+        renderTranscript();
     }
 
     private int dp(int value) {
@@ -194,7 +244,13 @@ public final class AiChatView extends LinearLayout {
         Bundle state = new Bundle();
         state.putString("draft", prompt.getText().toString());
         state.putString("conversation", conversationId);
-        state.putStringArrayList("transcript", new ArrayList<>(transcript));
+        ArrayList<String> snapshot = new ArrayList<>(transcript);
+        if (streamingQuestion != null && streamingAnswer.length() > 0) {
+            snapshot.add(streamingQuestion);
+            snapshot.add(getContext().getString(R.string.chat_incomplete) + "\n\n" + streamingAnswer);
+            while (snapshot.size() > 20) { snapshot.remove(0); snapshot.remove(0); }
+        }
+        state.putStringArrayList("transcript", snapshot);
         return state;
     }
 

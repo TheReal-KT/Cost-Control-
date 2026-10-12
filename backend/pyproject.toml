@@ -5,6 +5,7 @@ description = "Authenticated, synthetic-only LangGraph AI service for Agent Cost
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "anyio>=4.15,<5",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "langgraph>=1.0,<2",
