@@ -1,18 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AgentCostControl" parent="Theme.Material3.Light.NoActionBar">
+    <style name="Theme.AgentCostControl" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/brand_blue</item>
         <item name="colorOnPrimary">@color/brand_blue_on</item>
         <item name="colorPrimaryContainer">@color/brand_blue_soft</item>
         <item name="colorOnPrimaryContainer">@color/brand_blue</item>
         <item name="colorSurface">@color/surface</item>
         <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorError">@color/danger</item>
+        <item name="android:windowBackground">@color/surface</item>
         <item name="colorSurfaceVariant">@color/surface_raised</item>
         <item name="colorOutline">@color/card_outline</item>
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:statusBarColor">@color/surface</item>
         <item name="android:navigationBarColor">@color/surface</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 
     <style name="BrandMark">

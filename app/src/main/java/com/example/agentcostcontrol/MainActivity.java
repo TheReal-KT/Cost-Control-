@@ -221,13 +221,12 @@ public class MainActivity extends AppCompatActivity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         getWindow().setStatusBarColor(Ui.color(this, R.color.surface));
         boolean lightNavigationBar = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1;
-        getWindow().setNavigationBarColor(Ui.color(this,
-                lightNavigationBar ? R.color.surface : R.color.text_primary));
+        getWindow().setNavigationBarColor(Ui.color(this, R.color.surface));
         WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
-                .setAppearanceLightStatusBars(true);
+                .setAppearanceLightStatusBars(false);
         if (lightNavigationBar) {
             WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
-                    .setAppearanceLightNavigationBars(true);
+                    .setAppearanceLightNavigationBars(false);
         }
         setContentView(R.layout.activity_main);
         repository = new ViewModelProvider(this).get(AccountDataViewModel.class).getRepository();
@@ -408,7 +407,7 @@ public class MainActivity extends AppCompatActivity {
         navigationGeneration++;
         authScreen = null;
         clearFormViews();
-        setChrome(authTitle(), false);
+        setChrome(getString(R.string.app_name), false);
         AuthScreen.Mode mode = authMode == null ? AuthScreen.Mode.SIGN_IN : authMode;
         authScreen = new AuthScreen(this, mode, authMessage, authFormState, new AuthScreen.Actions() {
             @Override public void onSignIn(String email, String password) { signIn(email, password); }
@@ -433,7 +432,7 @@ public class MainActivity extends AppCompatActivity {
                 renderAuthentication();
             }
         });
-        attach(authScreen);
+        attach(Ui.scroll(this, authScreen));
     }
 
     private void signIn(String email, String password) {

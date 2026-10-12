@@ -93,7 +93,11 @@ public final class ServicesScreen {
     public static View detail(Context context, Subscription subscription, String monthlyEquivalent,
                               DetailActions actions) {
         LinearLayout page = Ui.page(context);
-        page.addView(Ui.heading(context, subscription.getName()));
+        LinearLayout identity = Ui.row(context);
+        ServiceBrand.prepend(context, identity, subscription.getName());
+        identity.addView(Ui.heading(context, subscription.getName()), new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        page.addView(identity, margin(context, 0, 8, 0, 8));
         page.addView(Ui.secondary(context, subscription.getCategory()), margin(context, 0, 2, 0, 12));
 
         String status = titleCase(subscription.getStatus().name());
@@ -162,6 +166,7 @@ public final class ServicesScreen {
                     list.addView(Ui.section(context, currentCurrency), margin(context, 0, 12, 0, 4));
                 }
                 LinearLayout row = Ui.row(context);
+                ServiceBrand.prepend(context, row, subscription.getName());
                 LinearLayout copy = Ui.column(context);
                 copy.addView(Ui.text(context, subscription.getName(), 15,
                         Ui.color(context, R.color.text_primary), true));

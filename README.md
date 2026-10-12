@@ -28,6 +28,13 @@ If OneDrive locks generated build files, add an absolute `BUILD_OUTPUT_DIR` path
 
 ## Application boundaries
 
+Debug builds also install a **Cost Control Preview** launcher. It shows 13 fictional subscriptions,
+including branded services, paused/cancelled records and an unknown-provider fallback. Home totals,
+Services search/filtering and detail screens reuse the real UI; sample prices are illustrative,
+not current market prices. Preview data lives only in memory and cannot be saved. Its activity and
+fixtures are under `app/src/debug`, so release builds exclude them. Your normal account data and
+saved session are unaffected. See [brand architecture comparison](docs/design/brand-logo-architecture.md).
+
 - `model`: typed records and validated form drafts; money is `BigDecimal`, row IDs are `long`, dates and instants use `java.time`.
 - `data`: HTTPS transport, Supabase Auth/profile/CRUD and encrypted session persistence. Call synchronous repository operations from a worker thread.
 - `domain`: currency-separated financial summaries and deterministic, bounded risk checks. No model calls or database writes.

@@ -15,6 +15,13 @@
         android:paddingStart="20dp"
         android:paddingEnd="20dp">
 
+        <ImageView
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginEnd="12dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_cost_control" />
+
         <TextView
             android:id="@+id/screen_title"
             style="@style/ScreenTitle"
@@ -37,7 +44,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/surface"
-        android:elevation="8dp"
+        android:elevation="0dp"
         android:minHeight="68dp"
         app:itemHorizontalTranslationEnabled="false"
         app:itemIconSize="22dp"

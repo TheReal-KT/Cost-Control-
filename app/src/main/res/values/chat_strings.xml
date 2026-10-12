@@ -1,9 +1,8 @@
 <resources>
-    <string name="chat_empty">Ask about subscriptions.</string>
     <string name="chat_prompt_hint">Ask AI</string>
-    <string name="chat_model_short">Nemotron Lightning</string>
+    <string name="chat_model_short">Nemotron</string>
     <string name="chat_model_full">Nemotron 3.5 Lightning (free)</string>
-    <string name="chat_model_selector">Choose model</string>
+    <string name="chat_model_selector">Choose model. NVIDIA Nemotron 3.5 Lightning, free.</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>
     <string name="chat_wait">Thinking…</string>

@@ -52,7 +52,7 @@ The three graph nodes live in `src/agentic_subscription_manager/workflow.py`. Ca
 
 The configured free endpoint asks callers not to submit confidential/personal data. A suitable real-data endpoint and reviewed data policy are required before adding owner-scoped application reads. At that point, resolve Auth UUID to the existing bigint profile ID and enforce the canonical ownership contract; do not reuse caller-supplied IDs or the prototype SQLAlchemy queries. [Provider data guidance](https://openrouter.ai/blog/insights/nemotron-3-5-lightning/).
 
-The provider request uses the fixed `:free` model, 400 maximum output tokens and disabled provider fallback. It does not request unsupported `response_format`, enable tools, retry failed calls, or substitute a paid model. Empty, wrong-type, overlong, malformed, tool-call and incomplete responses fail; model prose remains generated content, not a guarantee of factual correctness.
+The provider request uses the fixed `:free` model, 400 maximum output tokens, disabled reasoning and disabled provider fallback. Reasoning shares the output budget and otherwise can consume all 400 tokens without a visible answer. It does not request unsupported `response_format`, enable tools, retry failed calls, or substitute a paid model. Empty, wrong-type, overlong, malformed, tool-call and incomplete responses fail; model prose remains generated content, not a guarantee of factual correctness.
 
 ## Limits and failures
 

@@ -97,6 +97,7 @@ class RequestBudget:
         self.daily_count += 1  # Failed/cancelled provider attempts also consume capacity.
 
 
+# Run the AI graph until the client disconnects.
 async def run_until_disconnect(request: Request, graph, task):
     """Stop local graph/HTTP work on disconnect; remote provider cancellation is best effort."""
 
