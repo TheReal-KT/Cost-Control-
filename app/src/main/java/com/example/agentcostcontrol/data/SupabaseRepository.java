@@ -6,6 +6,8 @@ import com.example.agentcostcontrol.BuildConfig;
 import com.example.agentcostcontrol.model.BillingCycle;
 import com.example.agentcostcontrol.model.Budget;
 import com.example.agentcostcontrol.model.BudgetDraft;
+import com.example.agentcostcontrol.model.ChatConversation;
+import com.example.agentcostcontrol.model.ChatTurn;
 import com.example.agentcostcontrol.model.DecisionStatus;
 import com.example.agentcostcontrol.model.Recommendation;
 import com.example.agentcostcontrol.model.RecommendationAction;
@@ -45,7 +47,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Synchronous Supabase Auth and REST client. Call its methods from a worker thread. */
-public final class SupabaseRepository {
+public final class SupabaseRepository implements ChatHistoryRepository {
     private static final int MAX_PAGE_SIZE = 100;
     private static final long SESSION_REFRESH_SKEW_SECONDS = 60;
 
@@ -62,6 +64,10 @@ public final class SupabaseRepository {
                     "model_name,model_version,potential_monthly_saving::text,potential_annual_saving::text,created_at,expires_at";
     private static final String DECISION_SELECT =
             "decision_id::text,user_id::text,recommendation_id::text,decision,decision_date,title";
+    private static final String CHAT_CONVERSATION_SELECT =
+            "conversation_id,title,created_at,updated_at";
+    private static final String CHAT_TURN_SELECT =
+            "conversation_id,turn_id,question,answer,status,created_at,updated_at";
 
     private final String baseUrl;
     private final String publishableKey;
@@ -372,6 +378,74 @@ public final class SupabaseRepository {
                 "Reminder is no longer available");
     }
 
+    @Override
+    public ChatHistoryScope captureScope() throws ApiException {
+        synchronized (authLock) {
+            Session session = currentSession;
+            if (session == null && !sessionBlocked) session = loadSessionLocked();
+            if (session == null) throw authRequired();
+            return new ChatHistoryScope(session.getAuthUserId());
+        }
+    }
+
+    @Override
+    public List<ChatConversation> listConversations(ChatHistoryScope scope, int offset, int limit)
+            throws ApiException {
+        validatePage(limit, offset);
+        SessionSnapshot snapshot = chatHistorySnapshot(scope);
+        long userId = requireUserId(snapshot);
+        String path = OwnedRestQuery.ownedRows("chat_conversations", CHAT_CONVERSATION_SELECT, userId)
+                + "&order=updated_at.desc,conversation_id.desc&limit=" + limit + "&offset=" + offset;
+        return parseChatConversations(requestArray("GET", path, null, snapshot, null));
+    }
+
+    @Override
+    public List<ChatTurn> listTurns(ChatHistoryScope scope, String conversationId, int offset, int limit)
+            throws ApiException {
+        String cleanConversationId = chatUuid(conversationId, "Conversation");
+        validatePage(limit, offset);
+        SessionSnapshot snapshot = chatHistorySnapshot(scope);
+        long userId = requireUserId(snapshot);
+        String path = OwnedRestQuery.ownedRows("chat_turns", CHAT_TURN_SELECT, userId)
+                + "&conversation_id=eq." + cleanConversationId
+                + "&order=created_at.desc,turn_id.desc&limit=" + limit + "&offset=" + offset;
+        return parseChatTurns(requestArray("GET", path, null, snapshot, null));
+    }
+
+    @Override
+    public ChatTurn saveTurn(ChatHistoryScope scope, String conversationId, String turnId,
+                             String title, String question, String answer, boolean complete)
+            throws ApiException {
+        String cleanConversationId = chatUuid(conversationId, "Conversation");
+        String cleanTurnId = chatUuid(turnId, "Turn");
+        String cleanTitle = boundedChatInput(title, "Conversation title", 120, false, true);
+        String cleanQuestion = boundedChatInput(question, "Question", 4000, false, false);
+        String cleanAnswer = boundedChatInput(answer, "Answer", 16000, true, false);
+        SessionSnapshot snapshot = chatHistorySnapshot(scope);
+        requireUserId(snapshot);
+
+        JSONObject body = new JSONObject();
+        put(body, "p_conversation_id", cleanConversationId);
+        put(body, "p_turn_id", cleanTurnId);
+        put(body, "p_title", cleanTitle);
+        put(body, "p_question", cleanQuestion);
+        put(body, "p_answer", cleanAnswer);
+        put(body, "p_complete", complete);
+        return parseChatTurn(single(requestArray("POST", "/rest/v1/rpc/save_chat_turn", body,
+                snapshot, null), "Chat turn could not be saved"));
+    }
+
+    @Override
+    public void deleteConversation(ChatHistoryScope scope, String conversationId) throws ApiException {
+        String cleanConversationId = chatUuid(conversationId, "Conversation");
+        SessionSnapshot snapshot = chatHistorySnapshot(scope);
+        long userId = requireUserId(snapshot);
+        String path = OwnedRestQuery.ownedRows("chat_conversations", "conversation_id", userId)
+                + "&conversation_id=eq." + cleanConversationId;
+        requireOne(requestArray("DELETE", path, null, snapshot, "return=representation"),
+                "Conversation is no longer available");
+    }
+
     public List<Recommendation> listRecommendations(int limit, int offset) throws ApiException {
         validatePage(limit, offset);
         SessionSnapshot snapshot = requireSessionSnapshot();
@@ -582,6 +656,15 @@ public final class SupabaseRepository {
         synchronized (authLock) {
             Session session = currentSessionLocked();
             if (session == null) throw authRequired();
+            return new SessionSnapshot(session, authGeneration);
+        }
+    }
+
+    private SessionSnapshot chatHistorySnapshot(ChatHistoryScope scope) throws ApiException {
+        Objects.requireNonNull(scope, "scope");
+        synchronized (authLock) {
+            Session session = currentSessionLocked();
+            if (session == null || !scope.matches(session.getAuthUserId())) throw authRequired();
             return new SessionSnapshot(session, authGeneration);
         }
     }
@@ -832,6 +915,41 @@ public final class SupabaseRepository {
         return Collections.unmodifiableList(result);
     }
 
+    private List<ChatConversation> parseChatConversations(JSONArray rows) throws ApiException {
+        List<ChatConversation> result = new ArrayList<>(rows.length());
+        for (int i = 0; i < rows.length(); i++) result.add(parseChatConversation(row(rows, i)));
+        return Collections.unmodifiableList(result);
+    }
+
+    private ChatConversation parseChatConversation(JSONObject row) throws ApiException {
+        try {
+            return new ChatConversation(requiredString(row, "conversation_id"), requiredString(row, "title"),
+                    dateTime(row, "created_at"), dateTime(row, "updated_at"));
+        } catch (RuntimeException exception) {
+            throw dataFormat("The service returned an invalid chat conversation", exception);
+        }
+    }
+
+    private List<ChatTurn> parseChatTurns(JSONArray rows) throws ApiException {
+        List<ChatTurn> result = new ArrayList<>(rows.length());
+        for (int i = 0; i < rows.length(); i++) result.add(parseChatTurn(row(rows, i)));
+        return Collections.unmodifiableList(result);
+    }
+
+    private ChatTurn parseChatTurn(JSONObject row) throws ApiException {
+        try {
+            String status = requiredString(row, "status");
+            if (!"complete".equals(status) && !"incomplete".equals(status)) {
+                throw new IllegalArgumentException("Unexpected chat turn status");
+            }
+            return new ChatTurn(requiredString(row, "conversation_id"), requiredString(row, "turn_id"),
+                    requiredString(row, "question"), requiredString(row, "answer"),
+                    "complete".equals(status), dateTime(row, "created_at"), dateTime(row, "updated_at"));
+        } catch (RuntimeException exception) {
+            throw dataFormat("The service returned an invalid chat turn", exception);
+        }
+    }
+
     private Reminder parseReminder(JSONObject row) throws ApiException {
         try {
             return new Reminder(requiredLong(row, "reminder_id"), requiredLong(row, "user_id"),
@@ -1075,6 +1193,34 @@ public final class SupabaseRepository {
             throw new ApiException(ApiException.Category.VALIDATION,
                     "Choose a valid page size and position.", null, 0);
         }
+    }
+
+    private static String chatUuid(String value, String label) throws ApiException {
+        if (value == null) {
+            throw new ApiException(ApiException.Category.VALIDATION,
+                    "Invalid " + label.toLowerCase(Locale.ROOT) + " identifier.", null, 0);
+        }
+        try {
+            String canonical = UUID.fromString(value).toString();
+            if (!canonical.equalsIgnoreCase(value)) throw new IllegalArgumentException("Non-canonical UUID");
+            return canonical;
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(ApiException.Category.VALIDATION,
+                    "Invalid " + label.toLowerCase(Locale.ROOT) + " identifier.", null, 0, exception);
+        }
+    }
+
+    private static String boundedChatInput(String value, String label, int maximumLength,
+                                           boolean allowEmpty, boolean trim) throws ApiException {
+        if (value == null) {
+            throw new ApiException(ApiException.Category.VALIDATION, label + " is required.", null, 0);
+        }
+        String clean = trim ? value.trim() : value;
+        if ((!allowEmpty && clean.trim().isEmpty()) || clean.length() > maximumLength) {
+            throw new ApiException(ApiException.Category.VALIDATION,
+                    label + " is outside the allowed length.", null, 0);
+        }
+        return clean;
     }
 
     private static String queryValue(String value) {

@@ -18,6 +18,8 @@ Project: **Cost Control**, ref `tulpokqxlemjlcbuwabl`. [Database dashboard](http
 | `user_decision` | One current approved/rejected/ignored response per recommendation | Own-row CRUD |
 | `notifications` | Backend-produced notification records; distinct from editable reminders | Own-row read; update `read_at` only |
 | `activity_logs` | Database-generated create/update/delete history for subscriptions, reminders, budgets and decisions | Own-row read only |
+| `chat_conversations` | Account-owned UUID conversations with titles and timestamps | Own-row read/delete; atomic save RPC |
+| `chat_turns` | Paired question/answer turns with complete/incomplete status | Own-row read; atomic save RPC |
 
 Existing table names and bigint IDs are preserved. `reminders`, `user_settings` and `activity_logs` complete the required MVP. Connected accounts, provider credentials, usage connectors, bank links and payments are deferred.
 
@@ -105,8 +107,12 @@ Repositories should translate expected failures into domain results; screens dis
 
 ## Migration and verification
 
+Native chat history uses separate client-generated conversation and turn UUIDs; they are unrelated to the AI endpoint's temporary correlation ID. `save_chat_turn` is a security-invoker RPC that derives the bigint owner from the verified Auth UUID and atomically saves the conversation and turn. Stable IDs allow explicit save retries without duplicate messages. A completed answer cannot be replaced by a delayed partial save. Composite ownership keys and RLS prevent cross-account links and access. Deleting a conversation removes its turns. Saving history is an ordinary authenticated application operation; the model has no database write tool and receives no saved history. See [ADR 0004](adr/0004-native-chat-history.md).
+
 `supabase/migrations/` contains a snapshot of the seven pre-existing tables followed by the MVP additions/security changes. It contains no exported application records. Apply migrations once through the migration runner; do not rerun the SQL as an ad hoc idempotent script. Existing populated core tables should be checked against the new field constraints before applying this migration elsewhere.
 
 `supabase/tests/mvp_contract.sql` is a transactional integration suite with temporary Auth identities. Run it using a privileged SQL connection/tool; all fixture data rolls back. Identity/serial sequence counters can advance despite rollback. It tests authenticated ownership, mutation permissions, integrity constraints, reminder updates and deletion/audit behavior.
+
+`supabase/tests/chat_history_contract.sql` similarly verifies atomic/idempotent chat saves, partial-to-complete updates, ownership, bounded content and cascading deletion using rolled-back fictional accounts.
 
 Remote Supabase migration versions must match local filenames before using `db push`. This project uses the connected MCP migration tool for remote application; the saved local filename is synchronized with its recorded version. Docker/local Supabase is optional for this connected project, but a fresh local replay requires the normal Supabase Auth schemas supplied by the local stack.

@@ -1,6 +1,7 @@
 package com.example.agentcostcontrol;
 
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -1135,6 +1136,8 @@ public class MainActivity extends AppCompatActivity {
         if (aiSubview == AiSubview.CHAT) {
             if (aiChatView == null) {
                 aiChatView = new AiChatView(this);
+                aiChatView.setHistoryRepository(repository);
+                aiChatView.setOnConversationStateChangedListener(started -> updateAiTabsVisibility());
                 aiChatView.setAccessToken(session == null ? null : session.getAccessToken());
                 aiChatView.restoreState(chatState);
                 chatState = null;
@@ -1159,7 +1162,15 @@ public class MainActivity extends AppCompatActivity {
             int position = rootScrollPositions.getOrDefault(RootScreen.AI, 0);
             insights.post(() -> insights.scrollTo(0, position));
         }
+        updateAiTabsVisibility();
         return aiRootView;
+    }
+
+    private void updateAiTabsVisibility() {
+        if (aiTabs == null) return;
+        boolean focusedChat = aiSubview == AiSubview.CHAT && aiChatView != null
+                && aiChatView.hasStartedConversation();
+        aiTabs.setVisibility(focusedChat ? View.GONE : View.VISIBLE);
     }
 
     private void createAiRoot() {
@@ -1170,16 +1181,30 @@ public class MainActivity extends AppCompatActivity {
         aiTabs = new MaterialButtonToggleGroup(this);
         aiTabs.setSingleSelection(true);
         aiTabs.setSelectionRequired(true);
-        aiTabs.setPadding(Ui.dp(this, 16), Ui.dp(this, 6), Ui.dp(this, 16), Ui.dp(this, 8));
+        aiTabs.setPadding(0, 0, 0, 0);
         MaterialButton chat = Ui.button(this, "Chat", true);
         chat.setId(R.id.ai_chat_tab);
         MaterialButton insights = Ui.button(this, "Insights", false);
         insights.setId(R.id.ai_insights_tab);
-        aiTabs.addView(chat, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        aiTabs.addView(insights, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        for (MaterialButton tab : new MaterialButton[]{chat, insights}) {
+            int[][] checkedStates = {{android.R.attr.state_checked}, {}};
+            tab.setBackgroundTintList(new ColorStateList(checkedStates, new int[]{
+                    getColor(R.color.brand_blue), getColor(R.color.brand_blue_soft)}));
+            tab.setTextColor(new ColorStateList(checkedStates, new int[]{
+                    getColor(R.color.brand_blue_on), getColor(R.color.brand_blue)}));
+            tab.setStrokeWidth(0);
+            tab.setTextSize(13);
+            tab.setCornerRadius(Ui.dp(this, 20));
+            tab.setInsetTop(Ui.dp(this, 4));
+            tab.setInsetBottom(Ui.dp(this, 4));
+            tab.setPadding(Ui.dp(this, 12), 0, Ui.dp(this, 12), 0);
+            aiTabs.addView(tab, new LinearLayout.LayoutParams(0, Ui.dp(this, 48), 1));
+        }
         aiTabs.check(R.id.ai_chat_tab);
-        aiRootView.addView(aiTabs, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams tabLayout = new LinearLayout.LayoutParams(Ui.dp(this, 224), Ui.dp(this, 48));
+        tabLayout.gravity = Gravity.CENTER_HORIZONTAL;
+        tabLayout.bottomMargin = Ui.dp(this, 4);
+        aiRootView.addView(aiTabs, tabLayout);
 
         aiContent = new FrameLayout(this);
         aiRootView.addView(aiContent, new LinearLayout.LayoutParams(
@@ -1646,6 +1671,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void navigateBack() {
         if (writeInFlightRoute != null) return;
+        if (routes.isEmpty() && rootScreen == RootScreen.AI && aiSubview == AiSubview.CHAT
+                && aiChatView != null && aiChatView.handleBackPress()) return;
         if (authMode != null) {
             if (authMode == AuthScreen.Mode.CREATE_ACCOUNT) {
                 saveAuthState();
@@ -1787,6 +1814,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveCurrentScrollPosition() {
+        if (aiChatView != null) aiChatView.closeHistory();
         if (routes.isEmpty() && currentContent instanceof ScrollView) {
             rootScrollPositions.put(rootScreen, ((ScrollView) currentContent).getScrollY());
         } else if (routes.isEmpty() && rootScreen == RootScreen.AI && aiContent != null
