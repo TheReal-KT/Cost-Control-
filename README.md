@@ -26,6 +26,29 @@ The connected test command needs a running emulator or device. Auth-guard tests 
 
 If OneDrive locks generated build files, add an absolute `BUILD_OUTPUT_DIR` path outside the sync folder to ignored `local.properties`, for example `BUILD_OUTPUT_DIR=C:/Users/YOUR_NAME/AppData/Local/AgentCostControl/build`. Sync the project again in Android Studio. Gradle places each project's generated output beneath that folder, including the APK at `app/outputs/apk/debug/app-debug.apk`. This setting applies to both Android Studio and normal command-line builds; without it, the usual project-local build folders are used. Do not delete source or disable verification to resolve a generated-output lock.
 
+### Android Studio cannot load build artifacts
+
+After changing `BUILD_OUTPUT_DIR`, Android Studio can retain the previous APK location even when Gradle builds successfully. If Run reports an error loading `apk_ide_redirect_file/.../redirect.txt`:
+
+1. Save `local.properties`, then use **File → Sync Project with Gradle Files** (`Ctrl+Shift+O`). Wait for sync to finish.
+2. Select the **app** run configuration and the running emulator, then click **Run**. The default launcher is the real Cost Control application.
+3. If the error persists, regenerate the IDE artifacts, sync again, and retry Run:
+
+   ```powershell
+   $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+   .\gradlew.bat :app:assembleDebug '-Pandroid.injected.invoked.from.ide=true' --rerun-tasks --no-configuration-cache --max-workers=2
+   ```
+
+The redirect file points to APK metadata under `app/intermediates/apk/debug`. Android Studio uses these IDE artifacts; a normal command-line build can instead place its APK under `app/outputs/apk/debug`. Do not manually rewrite `redirect.txt` or point the run configuration at an old APK. Each developer configures their own ignored output path and syncs locally.
+
+To run directly from a terminal without Android Studio's artifact loader, start one emulator and run:
+
+```powershell
+pwsh -File scripts/Run-Android.ps1
+```
+
+This builds and installs the current debug application through Gradle, then launches `MainActivity` through ADB. It preserves existing application data and respects `BUILD_OUTPUT_DIR`. It uses ADB from PATH, `ANDROID_HOME`/`ANDROID_SDK_ROOT`, or the default Windows SDK location. If `JAVA_HOME` is unset, it uses Android Studio's bundled JDK at its default Windows installation path when available. Start local AI separately using the instructions below.
+
 ### Connect the emulator to local AI
 
 Configure ignored `backend/.env` as described in [backend setup](backend/README.md), start one emulator, and run from the repository root using PowerShell 7:
@@ -36,14 +59,23 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:installDebug
 ```
 
-Initialization generates a 30-day localhost TLS certificate and private key in ignored `.local-demo/`, sets Android's ignored `AI_ENDPOINT_URL` to `https://127.0.0.1:8443/ai/chat`, and forwards device port 8443 to this computer using ADB. Only the public certificate enters debug resources, trusted only for loopback; release builds retain system certificate trust and exclude it. Rerun initialization after an emulator/ADB restart; rebuild after certificate renewal. This requires no public tunnel or machine-wide certificate installation. Start the backend in another terminal:
+Initialization generates a 30-day localhost TLS certificate and private key in ignored `.local-demo/`, sets Android's ignored `AI_ENDPOINT_URL` to `https://127.0.0.1:8443/ai/chat`, and forwards device port 8443 to this computer using ADB. Only the public certificate enters debug resources, trusted only for loopback; release builds retain system certificate trust and exclude it. Rebuild after certificate renewal. This requires no public tunnel or machine-wide certificate installation. Start the backend from the repository root in another terminal:
 
 ```powershell
-cd backend
-uv run --locked --env-file .env uvicorn agentic_subscription_manager.api:create_app --factory --host 127.0.0.1 --port 8443 --ssl-keyfile ../.local-demo/server.key.pem --ssl-certfile ../.local-demo/server.cert.pem --no-access-log
+pwsh -File scripts/Start-LocalAi.ps1
 ```
 
-Open **Cost Control**, sign in, then **AI → Chat**. Ask “Explain my monthly spend” to stream an answer using your saved subscriptions and current budget. An empty account shows zero spending; Chat never substitutes sample records. Your question and account facts are sent to OpenRouter, as stated beside the composer. The separate **Cost Control Preview** launcher contains sample subscription screens and cannot authenticate chat. Stop keeps partial text labelled incomplete and retains the question for retry. For an opt-in emulator-to-backend TLS/Auth check, with the server running:
+Startup runs an incremental debug build/install before starting the server, so the installed app trusts the current certificate even after renewal. If initialization, building or installation fails, the server does not start; fix the reported error and rerun the command. The startup install preserves saved application data and does not launch the app. Open Cost Control afterwards or use Android Studio Run.
+
+Keep the server terminal open while using Chat. After restarting the emulator or ADB, rerun `scripts/Initialize-LocalDemo.ps1` to restore forwarding if the server is still running, or `scripts/Start-LocalAi.ps1` if it has stopped. If initialization renews the certificate while a server is already running, stop that server with `Ctrl+C` and rerun `Start-LocalAi.ps1` to install the matching certificate and restart HTTPS.
+
+The startup-order regression checks use isolated command stubs, without changing real certificates, launching a server or installing an app:
+
+```powershell
+pwsh -NoProfile -File scripts/tests/LocalAiStartupTest.ps1
+```
+
+Open **Cost Control**, sign in, then **AI → Chat**. Ask “Explain my monthly spend” to stream an answer using your saved subscriptions and current budget. An empty account shows zero spending; Chat never substitutes sample records. Your question and account facts are sent to OpenRouter. Stop keeps partial text labelled incomplete and retains the question for retry. For an opt-in emulator-to-backend TLS/Auth check, with the server running:
 
 ```powershell
 .\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.example.agentcostcontrol.chat.LocalAiConnectionTest' '-Pandroid.testInstrumentationRunnerArguments.verifyLocalAi=true'
@@ -53,12 +85,10 @@ For a physical Android device, connect it by USB with debugging enabled and use 
 
 ## Application boundaries
 
-Debug builds also install a **Cost Control Preview** launcher. It shows 13 fictional subscriptions,
-including branded services, paused/cancelled records and an unknown-provider fallback. Home totals,
-Services search/filtering and detail screens reuse the real UI; sample prices are illustrative,
-not current market prices. Preview data lives only in memory and cannot be saved. Its activity and
-fixtures are under `app/src/debug`, so release builds exclude them. Your normal account data and
-saved session are unaffected. See [brand architecture comparison](docs/design/brand-logo-architecture.md).
+Debug builds retain an internal preview activity for UI verification, with 13 fictional subscriptions.
+It has no launcher entry and is not exported to other apps. Its activity and fixtures are under
+`app/src/debug`, so release builds exclude them. Preview data lives only in memory and cannot be
+saved. See [brand architecture comparison](docs/design/brand-logo-architecture.md).
 
 - `model`: typed records and validated form drafts; money is `BigDecimal`, row IDs are `long`, dates and instants use `java.time`.
 - `data`: HTTPS transport, Supabase Auth/profile/CRUD and encrypted session persistence. Call synchronous repository operations from a worker thread.
@@ -66,7 +96,7 @@ saved session are unaffected. See [brand architecture comparison](docs/design/br
 - `ui` and `MainActivity`: native presentation, form state, navigation and background-result coordination. Root tabs are peers; task routes return to their origin.
 - `chat`: client for an authenticated application AI endpoint. It does not contact OpenRouter directly or include a provider credential.
 
-The AI root contains Chat and Insights. Chat keeps its model control inside the prompt field. The supported model is `nvidia/nemotron-3-super-120b-a12b:free`. Chat uses authenticated account records and sends the actual question to Nemotron. With no AI endpoint configured, Send keeps the draft and reports that Chat is not connected. No generated answer is simulated.
+The AI root contains Chat and Insights. Chat uses one compact action row for Insights, history and New chat, without repeated AI/Chat headings. Bottom navigation hides while the chat keyboard is open so the composer stays directly above it, and returns when the keyboard closes. Chat keeps its model control inside the prompt field. The supported model is `nvidia/nemotron-3-super-120b-a12b:free`. Chat uses authenticated account records and sends the actual question to Nemotron. With no AI endpoint configured, Send keeps the draft and reports that Chat is not connected. No generated answer is simulated.
 
 The Python/FastAPI service implements `/ai/chat` with two Python LangGraph nodes. It accepts `prompt`, `model`, optional `conversation_id`, `data_mode: "account"`, and optional `stream: true`. It verifies the Supabase session, resolves the owned profile, reads subscriptions and the current budget with the caller's token, calculates per-currency facts and sends those facts plus the actual question to Nemotron. Tokens and identity fields are excluded from provider messages. It streams application events to Android; JSON replies remain supported. There are no model tools, write executors or Gmail connections. Legacy Python login/CRUD routes are inactive. Android saves account-scoped conversations directly to Supabase and offers a Chat-only history drawer; saved history is not sent to the model. See [backend setup](backend/README.md), [real-account decision](docs/adr/0005-real-account-ai-chat.md), [chat history decision](docs/adr/0004-native-chat-history.md) and [AI architecture](docs/design/ai-chat-architecture.md). Source links and model memory remain separate work.
 

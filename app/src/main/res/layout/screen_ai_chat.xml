@@ -11,18 +11,26 @@
     <LinearLayout
         android:id="@+id/chat_toolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="48dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/chat_open_insights"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:minHeight="48dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="@string/chat_open_insights"
+            android:textAllCaps="false"
+            android:textColor="@color/text_secondary" />
+
+        <Space
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/chat_title"
-            android:textColor="@color/text_primary"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <ImageButton
             android:id="@+id/chat_history"
@@ -68,7 +76,7 @@
                     android:id="@+id/chat_empty"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:paddingTop="38dp"
+                    android:paddingTop="12dp"
                     android:paddingBottom="4dp"
                     android:text="@string/chat_empty"
                     android:textColor="@color/text_primary"
@@ -146,16 +154,8 @@
         android:textAllCaps="false"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/chat_data_notice"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingBottom="6dp"
-        android:text="@string/chat_data_notice"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp" />
-
     <com.google.android.material.card.MaterialCardView
+        android:id="@+id/chat_composer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"

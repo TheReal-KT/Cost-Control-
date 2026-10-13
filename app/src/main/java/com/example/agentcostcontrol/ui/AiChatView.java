@@ -54,6 +54,7 @@ import java.util.function.Consumer;
 
 /** Native chat composer, streamed transcript, and account-bound conversation history. */
 public final class AiChatView extends LinearLayout {
+    private static final long STREAM_RENDER_INTERVAL_MS = 50;
     private static final int CONVERSATION_PAGE_SIZE = 25;
     private static final int TURN_PAGE_SIZE = 40;
     private static final int SAVED_TURN_LIMIT = 40;
@@ -129,6 +130,8 @@ public final class AiChatView extends LinearLayout {
     private final ExecutorService modelWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService historyWorker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Object streamUpdateLock = new Object();
+    private final StringBuilder pendingStreamText = new StringBuilder();
     private final ArrayList<LocalTurn> transcript = new ArrayList<>();
     private final ArrayList<ChatConversation> historyConversations = new ArrayList<>();
     private final Map<String, String> endpointIdsByConversation = new HashMap<>();
@@ -142,8 +145,9 @@ public final class AiChatView extends LinearLayout {
     private String conversationTitle;
     private ChatHistoryRepository historyRepository;
     private Consumer<Boolean> conversationStateChangedListener;
+    private Runnable openInsightsListener;
     private Future<?> pending;
-    private int generation;
+    private volatile int generation;
     private int historyListGeneration;
     private int conversationLoadGeneration;
     private int turnPageGeneration;
@@ -163,6 +167,10 @@ public final class AiChatView extends LinearLayout {
     private int historyOffset;
     private int turnOffset;
     private StringBuilder streamingAnswer = new StringBuilder();
+    private Runnable streamFlushTask;
+    private LocalTurn streamFlushTurn;
+    private int streamFlushGeneration;
+    private boolean streamingFeedbackShown;
     private LocalTurn activeTurn;
     private LocalTurn retryableTurn;
     private TextView streamingBody;
@@ -187,6 +195,16 @@ public final class AiChatView extends LinearLayout {
         emptySubtitle = findViewById(R.id.chat_empty_subtitle);
         messages = findViewById(R.id.chat_turns);
         scroll = findViewById(R.id.chat_scroll);
+        scroll.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                         oldLeft, oldTop, oldRight, oldBottom) -> {
+            int oldHeight = oldBottom - oldTop;
+            if (bottom - top >= oldHeight || scroll.getChildCount() == 0) return;
+            // Keep the latest reply visible if the reader was at the bottom before resizing.
+            int contentBottom = scroll.getChildAt(0).getBottom();
+            if (scroll.getScrollY() + oldHeight >= contentBottom - dp(24)) {
+                scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+            }
+        });
         send = findViewById(R.id.chat_send);
         retrySave = findViewById(R.id.chat_retry_save);
 
@@ -223,6 +241,12 @@ public final class AiChatView extends LinearLayout {
         ImageButton newChat = findViewById(R.id.chat_new);
         newChat.setTooltipText(getContext().getString(R.string.chat_new));
         newChat.setOnClickListener(view -> startNewChat());
+        findViewById(R.id.chat_open_insights).setOnClickListener(view -> {
+            if (openInsightsListener != null) {
+                prompt.clearFocus();
+                openInsightsListener.run();
+            }
+        });
 
         findViewById(R.id.chat_suggestion_renew).setOnClickListener(
                 view -> useSuggestion(R.string.chat_suggestion_renew));
@@ -237,6 +261,10 @@ public final class AiChatView extends LinearLayout {
         retrySave.setOnClickListener(view -> retryFailedSave());
         setSending(false);
         updateSaveControls();
+    }
+
+    public void setOnOpenInsightsListener(Runnable listener) {
+        openInsightsListener = listener;
     }
 
     public void setAccessToken(String token) {
@@ -380,6 +408,8 @@ public final class AiChatView extends LinearLayout {
         activeTurn = turn;
         activeTurn.streaming = true;
         streamingAnswer = new StringBuilder();
+        clearPendingStreamText();
+        streamingFeedbackShown = false;
         setStartedConversation(true);
 
         int requestGeneration = ++generation;
@@ -398,19 +428,10 @@ public final class AiChatView extends LinearLayout {
         pending = modelWorker.submit(() -> {
             try {
                 ChatClient.Reply reply = client.askStream(BuildConfig.AI_ENDPOINT_URL, token,
-                        questionForRequest, endpointConversation, text -> mainHandler.post(() -> {
-                            if (disposed || requestGeneration != generation || activeTurn != submittedTurn) return;
-                            streamingAnswer.append(text);
-                            submittedTurn.answer = streamingAnswer.toString();
-                            submittedTurn.contentRevision++;
-                            submittedTurn.persisted = false;
-                            submittedTurn.saveFailed = false;
-                            addUnsavedTurn(submittedTurn);
-                            if (streamingBody != null) streamingBody.setText(submittedTurn.answer);
-                            showFeedback(R.string.chat_streaming);
-                            scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
-                        }));
+                        questionForRequest, endpointConversation,
+                        text -> queueStreamText(requestGeneration, submittedTurn, text));
                 mainHandler.post(() -> {
+                    flushPendingStreamText(requestGeneration, submittedTurn);
                     if (disposed || requestGeneration != generation || activeTurn != submittedTurn
                             || !requestConversationId.equals(conversationId)) return;
                     endpointConversationId = reply.conversationId;
@@ -426,6 +447,7 @@ public final class AiChatView extends LinearLayout {
                     retryableTurn = null;
                     streamingAnswer.setLength(0);
                     streamingBody = null;
+                    streamingFeedbackShown = false;
                     setDraftText("");
                     showFeedback(R.string.chat_saving);
                     idle();
@@ -449,6 +471,7 @@ public final class AiChatView extends LinearLayout {
         mainHandler.post(() -> {
             if (disposed || requestGeneration != generation || activeTurn != turn
                     || !turn.conversationId.equals(conversationId)) return;
+            flushPendingStreamText(requestGeneration, turn);
             if (clearBackendCorrelation) {
                 endpointConversationId = null;
                 endpointIdsByConversation.remove(turn.conversationId);
@@ -460,6 +483,7 @@ public final class AiChatView extends LinearLayout {
             retryableTurn = turn;
             streamingAnswer.setLength(0);
             streamingBody = null;
+            streamingFeedbackShown = false;
             draftsByConversation.put(conversationId, turn.question);
             showFeedback(message);
             idle();
@@ -477,14 +501,16 @@ public final class AiChatView extends LinearLayout {
 
     private void stopActiveTurn() {
         if (!requestActive && activeTurn == null) return;
+        LocalTurn stopped = activeTurn;
+        int stoppedGeneration = generation;
         generation++;
+        if (stopped != null) flushPendingStreamText(stoppedGeneration, stopped, true);
         client.cancel();
         if (pending != null) pending.cancel(true);
         pending = null;
         requestActive = false;
         prompt.setEnabled(true);
         setSending(false);
-        LocalTurn stopped = activeTurn;
         if (stopped != null) {
             stopped.answer = streamingAnswer.toString();
             stopped.complete = false;
@@ -496,8 +522,62 @@ public final class AiChatView extends LinearLayout {
         }
         streamingAnswer.setLength(0);
         streamingBody = null;
+        streamingFeedbackShown = false;
         feedback.setVisibility(GONE);
         renderMessages(true);
+    }
+
+    private void queueStreamText(int requestGeneration, LocalTurn turn, String text) {
+        synchronized (streamUpdateLock) {
+            if (requestGeneration != generation) return;
+            pendingStreamText.append(text);
+            if (streamFlushTask != null) return;
+            streamFlushGeneration = requestGeneration;
+            streamFlushTurn = turn;
+            streamFlushTask = () -> flushPendingStreamText(requestGeneration, turn);
+            mainHandler.postDelayed(streamFlushTask, STREAM_RENDER_INTERVAL_MS);
+        }
+    }
+
+    private void flushPendingStreamText(int requestGeneration, LocalTurn turn) {
+        flushPendingStreamText(requestGeneration, turn, false);
+    }
+
+    private void flushPendingStreamText(int requestGeneration, LocalTurn turn, boolean keepStoppedText) {
+        String delta;
+        synchronized (streamUpdateLock) {
+            if (streamFlushTask == null || streamFlushGeneration != requestGeneration
+                    || streamFlushTurn != turn) return;
+            mainHandler.removeCallbacks(streamFlushTask);
+            streamFlushTask = null;
+            streamFlushTurn = null;
+            delta = pendingStreamText.toString();
+            pendingStreamText.setLength(0);
+        }
+        if (delta.isEmpty() || disposed || (!keepStoppedText && requestGeneration != generation)
+                || activeTurn != turn) return;
+
+        streamingAnswer.append(delta);
+        turn.answer = streamingAnswer.toString();
+        turn.contentRevision++;
+        turn.persisted = false;
+        turn.saveFailed = false;
+        addUnsavedTurn(turn);
+        if (streamingBody != null) streamingBody.append(delta);
+        if (!streamingFeedbackShown) {
+            showFeedback(R.string.chat_streaming);
+            streamingFeedbackShown = true;
+        }
+        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void clearPendingStreamText() {
+        synchronized (streamUpdateLock) {
+            if (streamFlushTask != null) mainHandler.removeCallbacks(streamFlushTask);
+            streamFlushTask = null;
+            streamFlushTurn = null;
+            pendingStreamText.setLength(0);
+        }
     }
 
     private void startNewChat() {
@@ -598,26 +678,17 @@ public final class AiChatView extends LinearLayout {
     }
 
     private TextView addTurn(LocalTurn turn) {
-        addBubble(turn.question, true, R.string.chat_you, false);
+        addBubble(turn.question, true, false);
         String answer = turn.answer.isEmpty() && !turn.streaming
                 ? getContext().getString(R.string.chat_no_response) : turn.answer;
-        return addBubble(answer, false, R.string.chat_assistant, !turn.complete && !turn.streaming);
+        return addBubble(answer, false, !turn.complete && !turn.streaming);
     }
 
-    private TextView addBubble(String text, boolean user, int role, boolean incomplete) {
+    private TextView addBubble(String text, boolean user, boolean incomplete) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(VERTICAL);
         row.setGravity(user ? Gravity.END : Gravity.START);
         row.setTag(user ? "chat_user_row" : "chat_assistant_row");
-
-        TextView label = new TextView(getContext());
-        label.setText(role);
-        label.setTextColor(getContext().getColor(R.color.text_secondary));
-        label.setTextSize(12);
-        label.setPadding(dp(4), 0, dp(4), dp(5));
-        label.setGravity(user ? Gravity.END : Gravity.START);
-        row.addView(label, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         if (incomplete) {
             TextView state = new TextView(getContext());
@@ -639,6 +710,14 @@ public final class AiChatView extends LinearLayout {
         body.setBackgroundResource(user ? R.drawable.chat_user_bubble : R.drawable.chat_assistant_bubble);
         body.setMaxWidth(Math.round(getResources().getDisplayMetrics().widthPixels * 0.82f));
         body.setTag(user ? "chat_user_message" : "chat_assistant_message");
+        body.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                // Keep speaker context available to screen readers without visible role headings.
+                info.setContentDescription(getContext().getString(user ? R.string.chat_you
+                        : R.string.chat_assistant) + ": " + ((TextView) host).getText());
+            }
+        });
         LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         bodyParams.bottomMargin = dp(14);
@@ -1662,6 +1741,7 @@ public final class AiChatView extends LinearLayout {
         disposed = true;
         closeHistory();
         generation++;
+        clearPendingStreamText();
         client.cancel();
         if (pending != null) pending.cancel(true);
         pending = null;

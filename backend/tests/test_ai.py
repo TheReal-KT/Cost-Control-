@@ -167,6 +167,12 @@ class ApiContracts(unittest.TestCase):
         self.assertFalse(body["provider"]["allow_fallbacks"])
         self.assertNotIn("models", body)
         self.assertNotIn("response_format", body)
+        self.assertEqual("system", body["messages"][0]["role"])
+        self.assertTrue(
+            body["messages"][0]["content"].startswith(
+                "You are Cole, Cost Control's assistant. Answer"
+            )
+        )
         self.assertEqual(question, body["messages"][-1]["content"])
         self.assertIn("Netflix", body["messages"][1]["content"])
         self.assertNotIn("user_id", body["messages"][1]["content"])

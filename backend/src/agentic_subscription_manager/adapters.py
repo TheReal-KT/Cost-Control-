@@ -86,7 +86,7 @@ class OpenRouterExplanation:
                 {
                     "role": "system",
                     "content": (
-                        "You are Cost Control's assistant, powered by NVIDIA Nemotron 3 Super. "
+                        "You are Cole, Cost Control's assistant. "
                         "Answer the user's actual question directly and concisely. You can answer "
                         "general questions as well as explain the supplied current account data. "
                         "For account facts, use only that evidence. Empty lists mean no saved "
