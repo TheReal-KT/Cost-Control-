@@ -1,14 +1,11 @@
 <resources>
     <string name="chat_title">Chat</string>
-    <string name="chat_open_insights">Insights</string>
     <string name="chat_prompt_hint">Ask AI</string>
     <string name="chat_model_short">Nemotron</string>
     <string name="chat_model_full">Nemotron 3 Super (free)</string>
     <string name="chat_model_selector">Choose model. NVIDIA Nemotron 3 Super, free.</string>
-    <string name="chat_history_open">Chat history</string>
     <string name="chat_history_open_hint">Open this conversation</string>
     <string name="chat_history_title">Your chats</string>
-    <string name="chat_history_close">Close chat history</string>
     <string name="chat_history_loading">Loading your chats…</string>
     <string name="chat_history_loading_conversation">Loading conversation…</string>
     <string name="chat_history_load_failed">Couldn’t load chat history. Try again.</string>

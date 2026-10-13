@@ -18,6 +18,10 @@ copy and service imagery. It does not add wallet, biometric or payment flows.
   their existing components. NVIDIA branding identifies the configured Nemotron model; it does not
   imply that AI can access real account data.
 
+## Navigation update — 13 October 2026
+
+The navigation uses the shared sidebar described in [sidebar navigation](sidebar-navigation-2026-10-13.md): six destinations at the top, New chat, and a separate scroll area for saved conversations. The sidebar uses the raised surface and blue selected-state tokens. Chat and Insights are separate destinations with one consistent screen header and no bottom bar or subview toggle.
+
 ## Brand asset provenance
 
 The `ic_brand_*` VectorDrawables preserve the SVG path data from

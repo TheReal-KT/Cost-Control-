@@ -1,7 +1,6 @@
 package com.example.agentcostcontrol;
 
 import android.app.AlertDialog;
-import android.content.res.ColorStateList;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,9 +18,11 @@ import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
+import androidx.core.view.GravityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.lifecycle.ViewModelProvider;
 
 import com.example.agentcostcontrol.data.ApiException;
@@ -54,9 +55,8 @@ import com.example.agentcostcontrol.ui.RemindersScreen;
 import com.example.agentcostcontrol.ui.ServicesScreen;
 import com.example.agentcostcontrol.ui.SubscriptionForm;
 import com.example.agentcostcontrol.ui.Ui;
-import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.navigation.NavigationView;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.util.ArrayList;
@@ -100,7 +100,8 @@ public class MainActivity extends AppCompatActivity {
         HOME(R.id.nav_dashboard, "Home"),
         SERVICES(R.id.nav_subscriptions, "Services"),
         REMINDERS(R.id.nav_reminders, "Reminders"),
-        AI(R.id.nav_ai, "AI"),
+        CHAT(R.id.nav_chat, "Chat"),
+        INSIGHTS(R.id.nav_insights, "Insights"),
         PROFILE(R.id.nav_profile, "Profile");
 
         final int navigationId;
@@ -120,8 +121,6 @@ public class MainActivity extends AppCompatActivity {
         BUDGET_FORM,
         INSIGHT_DETAIL
     }
-
-    private enum AiSubview { CHAT, INSIGHTS }
 
     private static final class Route {
         final RouteType type;
@@ -176,7 +175,6 @@ public class MainActivity extends AppCompatActivity {
     private Session session;
     private UserProfile profile;
     private RootScreen rootScreen = RootScreen.HOME;
-    private AiSubview aiSubview = AiSubview.CHAT;
     private AuthScreen.Mode authMode;
     private String authMessage = "";
     private String serviceQuery = "";
@@ -201,10 +199,11 @@ public class MainActivity extends AppCompatActivity {
 
     private FrameLayout screenContainer;
     private TextView screenTitle;
-    private BottomNavigationView bottomNavigation;
-    private boolean bottomNavigationAllowed;
-    private boolean chatScreenVisible;
-    private boolean keyboardVisible;
+    private DrawerLayout navigationDrawer;
+    private NavigationView sidebarNavigation;
+    private LinearLayout navigationSidebar;
+    private FrameLayout sidebarHistory;
+    private boolean navigationAllowed;
     private View currentContent;
     private AuthScreen authScreen;
     private SubscriptionForm subscriptionForm;
@@ -212,9 +211,6 @@ public class MainActivity extends AppCompatActivity {
     private BudgetForm budgetForm;
     private MaterialButton saveButton;
     private MaterialButton cancelButton;
-    private MaterialButtonToggleGroup aiTabs;
-    private FrameLayout aiContent;
-    private LinearLayout aiRootView;
     private AiChatView aiChatView;
     private ScreenData currentData = new ScreenData();
 
@@ -237,13 +233,39 @@ public class MainActivity extends AppCompatActivity {
 
         screenContainer = findViewById(R.id.screen_container);
         screenTitle = findViewById(R.id.screen_title);
-        bottomNavigation = findViewById(R.id.bottom_navigation);
-        bottomNavigation.setOnItemSelectedListener(item -> {
+        navigationDrawer = findViewById(R.id.app_root);
+        sidebarNavigation = findViewById(R.id.sidebar_navigation);
+        navigationSidebar = findViewById(R.id.navigation_sidebar);
+        sidebarHistory = findViewById(R.id.sidebar_history);
+        navigationDrawer.setDrawerTitle(GravityCompat.START, getString(R.string.navigation_title));
+        navigationDrawer.setScrimColor(0x99000000);
+        sidebarNavigation.setNavigationItemSelectedListener(item -> {
+            if (!navigationAllowed || session == null) return false;
             RootScreen destination = rootForNavigation(item.getItemId());
+            closeNavigation();
             if (destination == rootScreen && routes.isEmpty() && authMode == null) return true;
             requestRoot(destination);
             return true;
         });
+        findViewById(R.id.navigation_open).setOnClickListener(view -> openNavigation());
+        findViewById(R.id.navigation_close).setOnClickListener(view -> closeNavigation());
+        findViewById(R.id.chat_new).setOnClickListener(view -> {
+            if (!navigationAllowed || session == null || writeInFlightRoute != null) return;
+            getOrCreateChatView().startNewChat();
+            closeNavigation();
+            requestRoot(RootScreen.CHAT);
+        });
+        navigationDrawer.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
+            @Override public void onDrawerOpened(View drawerView) {
+                if (navigationAllowed) showSidebarHistory();
+            }
+
+            @Override public void onDrawerClosed(View drawerView) {
+                if (aiChatView != null) aiChatView.closeHistory();
+            }
+        });
+        navigationSidebar.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                                     oldLeft, oldTop, oldRight, oldBottom) -> updateSidebarSize());
         applyInsets();
 
         if (savedInstanceState != null) restoreActivityState(savedInstanceState);
@@ -254,18 +276,65 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyInsets() {
-        View root = findViewById(R.id.app_root);
-        ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
+        View content = findViewById(R.id.main_content);
+        ViewCompat.setOnApplyWindowInsetsListener(navigationDrawer, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-            keyboardVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
-            view.setPadding(bars.left, bars.top, bars.right,
-                    Math.max(bars.bottom, keyboardVisible ? ime.bottom : 0));
-            updateBottomNavigationVisibility();
+            content.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            boolean sidebarOnRight = navigationSidebar.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            navigationSidebar.setPadding(sidebarOnRight ? 0 : bars.left, bars.top,
+                    sidebarOnRight ? bars.right : 0, bars.bottom);
+            updateSidebarSize();
             return windowInsets;
         });
-        ViewCompat.requestApplyInsets(root);
+        ViewCompat.requestApplyInsets(navigationDrawer);
+    }
+
+    private void openNavigation() {
+        if (!navigationAllowed || session == null) return;
+        showSidebarHistory();
+        navigationDrawer.openDrawer(GravityCompat.START);
+    }
+
+    private void closeNavigation() {
+        navigationDrawer.closeDrawer(GravityCompat.START);
+        if (aiChatView != null) aiChatView.closeHistory();
+    }
+
+    private void showSidebarHistory() {
+        WindowCompat.getInsetsController(getWindow(), screenContainer).hide(WindowInsetsCompat.Type.ime());
+        if (currentContent != null) currentContent.clearFocus();
+        AiChatView chat = getOrCreateChatView();
+        if (sidebarHistory.getChildCount() == 0) {
+            sidebarHistory.addView(chat.getHistoryView(), new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        chat.openHistory();
+    }
+
+    private void updateSidebarSize() {
+        int width = navigationDrawer.getWidth();
+        if (width <= 0) return;
+        ViewGroup.LayoutParams sidebarSize = navigationSidebar.getLayoutParams();
+        int sidebarWidth = Math.min(Ui.dp(this, 320), width - Ui.dp(this, 56));
+        if (sidebarSize.width != sidebarWidth) {
+            sidebarSize.width = sidebarWidth;
+            navigationSidebar.setLayoutParams(sidebarSize);
+        }
+        int height = navigationSidebar.getHeight() - navigationSidebar.getPaddingTop()
+                - navigationSidebar.getPaddingBottom();
+        if (height <= 0) return;
+        // On short screens the menu scrolls independently, leaving room for chat history.
+        int rowHeight = Ui.dp(this, Math.max(48,
+                Math.round(20 * getResources().getConfiguration().fontScale + 20)));
+        int menuHeight = Math.min(sidebarNavigation.getMenu().size() * rowHeight + Ui.dp(this, 8),
+                Math.max(Ui.dp(this, 96), height - Ui.dp(this, 56 + 64 + 9 + 144)));
+        ViewGroup.LayoutParams menuSize = sidebarNavigation.getLayoutParams();
+        if (menuSize.height != menuHeight) {
+            menuSize.height = menuHeight;
+            sidebarNavigation.setLayoutParams(menuSize);
+        }
     }
 
     private void restoreActivityState(Bundle state) {
@@ -286,11 +355,15 @@ public class MainActivity extends AppCompatActivity {
         // Activity recreation invalidates any prior list check; protected data must be fetched again.
         uncertainListChecked = false;
         RootScreen restoredRoot = rootFromName(state.getString(STATE_ROOT));
+        // Migrate saved state from the former AI root with its Chat/Insights subview.
+        if ("AI".equals(state.getString(STATE_ROOT))) {
+            restoredRoot = "INSIGHTS".equals(state.getString(STATE_AI_SUBVIEW))
+                    ? RootScreen.INSIGHTS : RootScreen.CHAT;
+        }
         rootScreen = restoredRoot == null ? RootScreen.HOME : restoredRoot;
         serviceQuery = state.getString(STATE_SERVICE_QUERY, "");
         serviceFilter = state.getString(STATE_SERVICE_FILTER, "All");
         reminderFilter = state.getString(STATE_REMINDER_FILTER, "Upcoming");
-        aiSubview = "INSIGHTS".equals(state.getString(STATE_AI_SUBVIEW)) ? AiSubview.INSIGHTS : AiSubview.CHAT;
         authMessage = state.getString(STATE_AUTH_MESSAGE, "");
         String savedAuthMode = state.getString(STATE_AUTH_MODE);
         if (savedAuthMode != null) {
@@ -302,7 +375,9 @@ public class MainActivity extends AppCompatActivity {
         chatState = state.getBundle(STATE_CHAT);
         int[] positions = state.getIntArray(STATE_SCROLL_POSITIONS);
         if (positions != null) {
-            RootScreen[] roots = RootScreen.values();
+            RootScreen[] roots = positions.length == 5
+                    ? new RootScreen[]{RootScreen.HOME, RootScreen.SERVICES, RootScreen.REMINDERS,
+                        RootScreen.INSIGHTS, RootScreen.PROFILE} : RootScreen.values();
             for (int i = 0; i < roots.length && i < positions.length; i++) rootScrollPositions.put(roots[i], positions[i]);
         }
 
@@ -558,7 +633,6 @@ public class MainActivity extends AppCompatActivity {
             serviceQuery = "";
             serviceFilter = "All";
             reminderFilter = "Upcoming";
-            aiSubview = AiSubview.CHAT;
         }
         if (aiChatView != null) aiChatView.setAccessToken(session.getAccessToken());
         renderCurrentRoute();
@@ -645,7 +719,7 @@ public class MainActivity extends AppCompatActivity {
         RootScreen targetRoot = targetRootForWrite(uncertainWriteRoute);
         String listTitle = targetRoot.title;
         boolean refreshedListVisible = uncertainListChecked && rootScreen == targetRoot
-                && routes.isEmpty() && (targetRoot != RootScreen.AI || aiSubview == AiSubview.INSIGHTS);
+                && routes.isEmpty();
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         if (!refreshedListVisible) {
             builder.setTitle("Save status unknown")
@@ -654,7 +728,6 @@ public class MainActivity extends AppCompatActivity {
                         RouteType type = uncertainWriteRoute;
                         preserveUncertainForm();
                         uncertainListChecked = false;
-                        if (type == RouteType.INSIGHT_DETAIL) aiSubview = AiSubview.INSIGHTS;
                         uncertainWriteDialogVisible = false;
                         switchRoot(targetRootForWrite(type));
                     })
@@ -687,7 +760,7 @@ public class MainActivity extends AppCompatActivity {
             case SERVICES: return currentData.hasMoreSubscriptions;
             case REMINDERS: return currentData.hasMoreReminders;
             case PROFILE: return currentData.hasMoreBudgets;
-            case AI: return currentData.hasMoreRecommendations;
+            case INSIGHTS: return currentData.hasMoreRecommendations;
             default: return false;
         }
     }
@@ -707,7 +780,6 @@ public class MainActivity extends AppCompatActivity {
             routes.clear();
             routes.add(new Route(suspendedFormRoute, suspendedFormId, suspendedFormRelatedId));
             formState = suspendedFormState == null ? null : new Bundle(suspendedFormState);
-            if (suspendedFormRoute == RouteType.INSIGHT_DETAIL) aiSubview = AiSubview.INSIGHTS;
             clearSuspendedWrite();
             navigationGeneration++;
             renderCurrentRoute();
@@ -730,7 +802,7 @@ public class MainActivity extends AppCompatActivity {
             case REMINDER_FORM:
             case REMINDER_DETAIL: return RootScreen.REMINDERS;
             case BUDGET_FORM: return RootScreen.PROFILE;
-            default: return RootScreen.AI;
+            default: return RootScreen.INSIGHTS;
         }
     }
 
@@ -784,7 +856,7 @@ public class MainActivity extends AppCompatActivity {
             renderAuthentication();
             return;
         }
-        if (rootScreen == RootScreen.AI && aiSubview == AiSubview.CHAT && routes.isEmpty()) {
+        if (rootScreen == RootScreen.CHAT && routes.isEmpty()) {
             currentData = new ScreenData();
             renderPage(currentData);
             return;
@@ -793,9 +865,7 @@ public class MainActivity extends AppCompatActivity {
         final int navigation = navigationGeneration;
         final String authUserId = session.getAuthUserId();
         final RootScreen requestedRoot = rootScreen;
-        final boolean includeInsights = requestedRoot == RootScreen.AI
-                && (aiSubview == AiSubview.INSIGHTS || containsRoute(RouteType.INSIGHT_DETAIL));
-        final Long decisionLookupId = decisionLookupIdForLoad(requestedRoot, includeInsights);
+        final Long decisionLookupId = decisionLookupIdForLoad(requestedRoot);
         if (uncertainWriteRoute != null && routes.isEmpty()
                 && requestedRoot == targetRootForWrite(uncertainWriteRoute)) {
             uncertainListChecked = false;
@@ -804,12 +874,12 @@ public class MainActivity extends AppCompatActivity {
         dataWorker.execute(() -> {
             ScreenData data;
             try {
-                data = loadData(requestedRoot, includeInsights, decisionLookupId);
+                data = loadData(requestedRoot, decisionLookupId);
             } catch (ApiException error) {
                 if (error.getCategory() == ApiException.Category.AUTH_REQUIRED) {
                     try {
                         Session refreshed = repository.refreshSession();
-                        data = loadData(requestedRoot, includeInsights, decisionLookupId);
+                        data = loadData(requestedRoot, decisionLookupId);
                         data.refreshedSession = refreshed;
                     } catch (ApiException refreshError) {
                         postLoadError(generation, navigation, authUserId, refreshError,
@@ -833,8 +903,7 @@ public class MainActivity extends AppCompatActivity {
                 currentData = result;
                 applyDecisionLookup(result.decisionLookup, decisionLookupId);
                 if (uncertainWriteRoute != null && routes.isEmpty()
-                        && requestedRoot == targetRootForWrite(uncertainWriteRoute)
-                        && (requestedRoot != RootScreen.AI || includeInsights)) {
+                        && requestedRoot == targetRootForWrite(uncertainWriteRoute)) {
                     uncertainListChecked = true;
                 }
                 renderPage(result);
@@ -842,7 +911,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private ScreenData loadData(RootScreen root, boolean includeInsights, Long decisionLookupId)
+    private ScreenData loadData(RootScreen root, Long decisionLookupId)
             throws ApiException {
         ScreenData data = new ScreenData();
         switch (root) {
@@ -861,16 +930,14 @@ public class MainActivity extends AppCompatActivity {
                 data.reminders = repository.listReminders(PAGE_SIZE, 0);
                 data.hasMoreReminders = data.reminders.size() == PAGE_SIZE;
                 break;
-            case AI:
-                if (includeInsights) {
-                    loadBoundedSubscriptions(data);
-                    data.budgets = loadCurrentPeriodBudgets();
-                    data.recommendations = repository.listRecommendations(PAGE_SIZE, 0);
-                    data.hasMoreRecommendations = data.recommendations.size() == PAGE_SIZE;
-                    if (decisionLookupId != null) {
-                        data.decisionLookup = new DecisionLookup(decisionLookupId,
-                                repository.getDecision(decisionLookupId));
-                    }
+            case INSIGHTS:
+                loadBoundedSubscriptions(data);
+                data.budgets = loadCurrentPeriodBudgets();
+                data.recommendations = repository.listRecommendations(PAGE_SIZE, 0);
+                data.hasMoreRecommendations = data.recommendations.size() == PAGE_SIZE;
+                if (decisionLookupId != null) {
+                    data.decisionLookup = new DecisionLookup(decisionLookupId,
+                            repository.getDecision(decisionLookupId));
                 }
                 break;
             case PROFILE:
@@ -883,8 +950,8 @@ public class MainActivity extends AppCompatActivity {
         return data;
     }
 
-    private Long decisionLookupIdForLoad(RootScreen requestedRoot, boolean includeInsights) {
-        if (requestedRoot != RootScreen.AI || !includeInsights) return null;
+    private Long decisionLookupIdForLoad(RootScreen requestedRoot) {
+        if (requestedRoot != RootScreen.INSIGHTS) return null;
         if (!routes.isEmpty()) {
             Route route = routes.get(routes.size() - 1);
             return route.type == RouteType.INSIGHT_DETAIL ? route.id : null;
@@ -937,7 +1004,7 @@ public class MainActivity extends AppCompatActivity {
         switch (expectedRoot) {
             case SERVICES: offset = currentData.subscriptions.size(); break;
             case REMINDERS: offset = currentData.reminders.size(); break;
-            case AI: offset = currentData.recommendations.size(); break;
+            case INSIGHTS: offset = currentData.recommendations.size(); break;
             case PROFILE: offset = currentData.budgets.size(); break;
             default:
                 loadingMore = false;
@@ -954,7 +1021,7 @@ public class MainActivity extends AppCompatActivity {
                     case REMINDERS:
                         more.reminders = repository.listReminders(PAGE_SIZE, offset);
                         break;
-                    case AI:
+                    case INSIGHTS:
                         more.recommendations = repository.listRecommendations(PAGE_SIZE, offset);
                         break;
                     case PROFILE:
@@ -989,7 +1056,7 @@ public class MainActivity extends AppCompatActivity {
                         currentData.reminders = append(currentData.reminders, resultPage.reminders);
                         currentData.hasMoreReminders = resultPage.reminders.size() == PAGE_SIZE;
                         break;
-                    case AI:
+                    case INSIGHTS:
                         currentData.recommendations = append(currentData.recommendations, resultPage.recommendations);
                         currentData.hasMoreRecommendations = resultPage.recommendations.size() == PAGE_SIZE;
                         break;
@@ -1047,17 +1114,12 @@ public class MainActivity extends AppCompatActivity {
                 && session != null && authUserId.equals(session.getAuthUserId());
     }
 
-    private boolean containsRoute(RouteType type) {
-        for (Route route : routes) if (route.type == type) return true;
-        return false;
-    }
-
     private void renderPage(ScreenData data) {
         navigationGeneration++;
         clearFormViews();
         boolean atRoot = routes.isEmpty();
         setChrome(currentTitle(), atRoot);
-        bottomNavigation.getMenu().findItem(rootScreen.navigationId).setChecked(true);
+        sidebarNavigation.setCheckedItem(rootScreen.navigationId);
         View page;
         if (atRoot) {
             page = renderRoot(data);
@@ -1111,8 +1173,10 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onFilterChanged(String filter) { reminderFilter = filter; }
                             @Override public void onLoadMore() { loadMore(RootScreen.REMINDERS); }
                         });
-            case AI:
-                return renderAiRoot(data);
+            case CHAT:
+                return getOrCreateChatView();
+            case INSIGHTS:
+                return renderInsightsRoot(data);
             case PROFILE:
                 UserProfile rootProfile = data.profile == null ? profile : data.profile;
                 if (rootProfile == null) {
@@ -1131,100 +1195,33 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private View renderAiRoot(ScreenData data) {
-        if (aiRootView == null) createAiRoot();
-        if (aiTabs != null) {
-            int selectedId = aiSubview == AiSubview.CHAT ? R.id.ai_chat_tab : R.id.ai_insights_tab;
-            aiTabs.check(selectedId);
+    private AiChatView getOrCreateChatView() {
+        if (aiChatView == null) {
+            aiChatView = new AiChatView(this);
+            aiChatView.setHistoryRepository(repository);
+            aiChatView.setAccessToken(session == null ? null : session.getAccessToken());
+            aiChatView.restoreState(chatState);
+            aiChatView.setOnConversationOpenedListener(() -> {
+                closeNavigation();
+                requestRoot(RootScreen.CHAT);
+            });
+            chatState = null;
         }
-        aiContent.removeAllViews();
-        if (aiSubview == AiSubview.CHAT) {
-            if (aiChatView == null) {
-                aiChatView = new AiChatView(this);
-                aiChatView.setHistoryRepository(repository);
-                aiChatView.setOnOpenInsightsListener(() -> {
-                    WindowCompat.getInsetsController(getWindow(), screenContainer)
-                            .hide(WindowInsetsCompat.Type.ime());
-                    aiTabs.check(R.id.ai_insights_tab);
+        return aiChatView;
+    }
+
+    private View renderInsightsRoot(ScreenData data) {
+        RiskChecksView localChecks = new RiskChecksView(this, session.getAuthUserId(),
+                data.subscriptions, data.budgets, data.subscriptionsComplete,
+                subscriptionId -> {
+                    Subscription subscription = findSubscription(data.subscriptions, subscriptionId);
+                    if (subscription != null) openServiceDetail(subscription);
                 });
-                aiChatView.setAccessToken(session == null ? null : session.getAccessToken());
-                aiChatView.restoreState(chatState);
-                chatState = null;
-            }
-            removeFromParent(aiChatView);
-            aiContent.addView(aiChatView, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        } else {
-            RiskChecksView localChecks = new RiskChecksView(this, session.getAuthUserId(),
-                    data.subscriptions, data.budgets, data.subscriptionsComplete,
-                    subscriptionId -> {
-                        Subscription subscription = findSubscription(data.subscriptions, subscriptionId);
-                        if (subscription != null) openServiceDetail(subscription);
-                    });
-            View insights = InsightsScreen.list(this, localChecks, data.recommendations, data.subscriptions,
-                    data.hasMoreRecommendations, new InsightsScreen.Actions() {
-                        @Override public void onOpen(Recommendation recommendation) { openInsightDetail(recommendation); }
-                        @Override public void onLoadMore() { loadMore(RootScreen.AI); }
-                    });
-            aiContent.addView(insights, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            int position = rootScrollPositions.getOrDefault(RootScreen.AI, 0);
-            insights.post(() -> insights.scrollTo(0, position));
-        }
-        updateAiTabsVisibility();
-        return aiRootView;
-    }
-
-    private void updateAiTabsVisibility() {
-        if (aiTabs == null) return;
-        aiTabs.setVisibility(aiSubview == AiSubview.CHAT ? View.GONE : View.VISIBLE);
-    }
-
-    private void createAiRoot() {
-        aiRootView = new LinearLayout(this);
-        aiRootView.setOrientation(LinearLayout.VERTICAL);
-        aiRootView.setBackgroundColor(Ui.color(this, R.color.surface));
-
-        aiTabs = new MaterialButtonToggleGroup(this);
-        aiTabs.setSingleSelection(true);
-        aiTabs.setSelectionRequired(true);
-        aiTabs.setPadding(0, 0, 0, 0);
-        MaterialButton chat = Ui.button(this, "Chat", true);
-        chat.setId(R.id.ai_chat_tab);
-        MaterialButton insights = Ui.button(this, "Insights", false);
-        insights.setId(R.id.ai_insights_tab);
-        for (MaterialButton tab : new MaterialButton[]{chat, insights}) {
-            int[][] checkedStates = {{android.R.attr.state_checked}, {}};
-            tab.setBackgroundTintList(new ColorStateList(checkedStates, new int[]{
-                    getColor(R.color.brand_blue), getColor(R.color.brand_blue_soft)}));
-            tab.setTextColor(new ColorStateList(checkedStates, new int[]{
-                    getColor(R.color.brand_blue_on), getColor(R.color.brand_blue)}));
-            tab.setStrokeWidth(0);
-            tab.setTextSize(13);
-            tab.setCornerRadius(Ui.dp(this, 20));
-            tab.setInsetTop(Ui.dp(this, 4));
-            tab.setInsetBottom(Ui.dp(this, 4));
-            tab.setPadding(Ui.dp(this, 12), 0, Ui.dp(this, 12), 0);
-            aiTabs.addView(tab, new LinearLayout.LayoutParams(0, Ui.dp(this, 48), 1));
-        }
-        aiTabs.check(R.id.ai_chat_tab);
-        LinearLayout.LayoutParams tabLayout = new LinearLayout.LayoutParams(Ui.dp(this, 224), Ui.dp(this, 48));
-        tabLayout.gravity = Gravity.CENTER_HORIZONTAL;
-        tabLayout.bottomMargin = Ui.dp(this, 4);
-        aiRootView.addView(aiTabs, tabLayout);
-
-        aiContent = new FrameLayout(this);
-        aiRootView.addView(aiContent, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-        aiTabs.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
-            if (!isChecked) return;
-            AiSubview next = checkedId == R.id.ai_insights_tab ? AiSubview.INSIGHTS : AiSubview.CHAT;
-            if (next == aiSubview) return;
-            saveCurrentScrollPosition();
-            aiSubview = next;
-            navigationGeneration++;
-            renderCurrentRoute();
-        });
+        return InsightsScreen.list(this, localChecks, data.recommendations, data.subscriptions,
+                data.hasMoreRecommendations, new InsightsScreen.Actions() {
+                    @Override public void onOpen(Recommendation recommendation) { openInsightDetail(recommendation); }
+                    @Override public void onLoadMore() { loadMore(RootScreen.INSIGHTS); }
+                });
     }
 
     private View renderTaskRoute(ScreenData data, Route route) {
@@ -1678,8 +1675,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void navigateBack() {
         if (writeInFlightRoute != null) return;
-        if (routes.isEmpty() && rootScreen == RootScreen.AI && aiSubview == AiSubview.CHAT
-                && aiChatView != null && aiChatView.handleBackPress()) return;
+        if (navigationDrawer.isDrawerVisible(GravityCompat.START)) {
+            closeNavigation();
+            return;
+        }
         if (authMode != null) {
             if (authMode == AuthScreen.Mode.CREATE_ACCOUNT) {
                 saveAuthState();
@@ -1785,18 +1784,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void setChrome(String title, boolean showBottomNav) {
+    private void setChrome(String title, boolean showNavigation) {
         screenTitle.setText(title);
-        bottomNavigationAllowed = showBottomNav;
-        chatScreenVisible = showBottomNav && authMode == null && rootScreen == RootScreen.AI
-                && aiSubview == AiSubview.CHAT && routes.isEmpty();
-        findViewById(R.id.app_header).setVisibility(chatScreenVisible ? View.GONE : View.VISIBLE);
-        updateBottomNavigationVisibility();
-    }
-
-    private void updateBottomNavigationVisibility() {
-        boolean visible = bottomNavigationAllowed && !(chatScreenVisible && keyboardVisible);
-        bottomNavigation.setVisibility(visible ? View.VISIBLE : View.GONE);
+        navigationAllowed = showNavigation && authMode == null && session != null;
+        findViewById(R.id.navigation_open).setVisibility(navigationAllowed ? View.VISIBLE : View.GONE);
+        navigationDrawer.setDrawerLockMode(navigationAllowed
+                ? DrawerLayout.LOCK_MODE_UNLOCKED : DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
+        sidebarNavigation.setCheckedItem(rootScreen.navigationId);
+        if (!navigationAllowed) closeNavigation();
     }
 
     private String currentTitle() {
@@ -1830,12 +1825,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveCurrentScrollPosition() {
-        if (aiChatView != null) aiChatView.closeHistory();
         if (routes.isEmpty() && currentContent instanceof ScrollView) {
             rootScrollPositions.put(rootScreen, ((ScrollView) currentContent).getScrollY());
-        } else if (routes.isEmpty() && rootScreen == RootScreen.AI && aiContent != null
-                && aiContent.getChildCount() > 0 && aiContent.getChildAt(0) instanceof ScrollView) {
-            rootScrollPositions.put(rootScreen, aiContent.getChildAt(0).getScrollY());
         }
     }
 
@@ -1863,7 +1854,6 @@ public class MainActivity extends AppCompatActivity {
         recordedDecisionNames.clear();
         rootScrollPositions.clear();
         rootScreen = RootScreen.HOME;
-        aiSubview = AiSubview.CHAT;
         serviceQuery = "";
         serviceFilter = "All";
         reminderFilter = "Upcoming";
@@ -1871,14 +1861,9 @@ public class MainActivity extends AppCompatActivity {
             aiChatView.dispose();
             aiChatView = null;
         }
-        aiRootView = null;
-        aiTabs = null;
-        aiContent = null;
+        closeNavigation();
+        sidebarHistory.removeAllViews();
         chatState = null;
-    }
-
-    private void removeFromParent(View view) {
-        if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
     }
 
     private void saveVisibleDraft() {
@@ -1903,7 +1888,6 @@ public class MainActivity extends AppCompatActivity {
         outState.putString(STATE_SERVICE_QUERY, serviceQuery);
         outState.putString(STATE_SERVICE_FILTER, serviceFilter);
         outState.putString(STATE_REMINDER_FILTER, reminderFilter);
-        outState.putString(STATE_AI_SUBVIEW, aiSubview.name());
         outState.putString(STATE_AUTH_USER_ID, session == null
                 ? protectedStateAuthUserId : session.getAuthUserId());
         RouteType pendingWrite = writeInFlightRoute != null ? writeInFlightRoute : uncertainWriteRoute;
@@ -1919,6 +1903,7 @@ public class MainActivity extends AppCompatActivity {
         }
         outState.putIntArray(STATE_SCROLL_POSITIONS, positions);
         if (aiChatView != null) outState.putBundle(STATE_CHAT, aiChatView.saveState());
+        else if (chatState != null) outState.putBundle(STATE_CHAT, new Bundle(chatState));
         long[] decisionIds = new long[recordedDecisionNames.size()];
         String[] decisionValues = new String[recordedDecisionNames.size()];
         int index = 0;

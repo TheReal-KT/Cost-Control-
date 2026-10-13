@@ -1,6 +1,7 @@
 package com.example.agentcostcontrol.ui;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -11,6 +12,7 @@ import android.widget.LinearLayout;
 import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.model.Subscription;
 import com.example.agentcostcontrol.model.SubscriptionStatus;
+import com.google.android.material.button.MaterialButton;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.textfield.TextInputEditText;
@@ -132,6 +134,9 @@ public final class ServicesScreen {
         page.addView(Ui.divider(context), margin(context, 0, 12, 0, 12));
         com.google.android.material.button.MaterialButton delete = Ui.textButton(context, "Delete service");
         delete.setTextColor(Ui.color(context, R.color.danger));
+        delete.setIconResource(R.drawable.ic_action_delete);
+        delete.setIconTint(ColorStateList.valueOf(Ui.color(context, R.color.danger)));
+        delete.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
         delete.setOnClickListener(view -> actions.onDelete());
         page.addView(delete);
         return Ui.scroll(context, page);

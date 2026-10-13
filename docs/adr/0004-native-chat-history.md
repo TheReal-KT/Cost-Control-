@@ -10,7 +10,7 @@ The Android chat needs a history drawer and New Chat, with messages surviving ap
 
 ## Decision
 
-Android owns conversation presentation and calls a narrow `ChatHistoryRepository` implemented by the existing authenticated Supabase repository. A conversation has a client-generated UUID, title and timestamps; each turn pairs the user question with a complete or incomplete assistant answer. Paging bounds history reads. New Chat creates a separate conversation and restores the compact Chat/Insights controls.
+Android owns conversation presentation and calls a narrow `ChatHistoryRepository` implemented by the existing authenticated Supabase repository. A conversation has a client-generated UUID, title and timestamps; each turn pairs the user question with a complete or incomplete assistant answer. Paging bounds history reads. New Chat creates a separate conversation. The [13 October sidebar update](../design/sidebar-navigation-2026-10-13.md) moves history and New chat into shared navigation and makes Chat and Insights separate destinations; the persistence contract is unchanged.
 
 Use account-owned `chat_conversations` and `chat_turns`, keyed with the canonical bigint profile owner. Row-level security checks the verified Supabase Auth identity. A security-invoker RPC atomically saves the parent and turn using stable UUIDs, making deliberate save retries idempotent. It cannot downgrade a completed answer to an incomplete partial response. Deleting a conversation cascades to its turns.
 

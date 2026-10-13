@@ -1,10 +1,7 @@
 package com.example.agentcostcontrol.ui;
 
-import android.app.Dialog;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,14 +12,14 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
-import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.core.view.ViewCompat;
 
 import com.example.agentcostcontrol.BuildConfig;
 import com.example.agentcostcontrol.R;
@@ -37,6 +34,9 @@ import com.google.android.material.button.MaterialButton;
 import org.json.JSONException;
 
 import java.io.IOException;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -145,7 +145,7 @@ public final class AiChatView extends LinearLayout {
     private String conversationTitle;
     private ChatHistoryRepository historyRepository;
     private Consumer<Boolean> conversationStateChangedListener;
-    private Runnable openInsightsListener;
+    private Runnable conversationOpenedListener;
     private Future<?> pending;
     private volatile int generation;
     private int historyListGeneration;
@@ -175,7 +175,9 @@ public final class AiChatView extends LinearLayout {
     private LocalTurn retryableTurn;
     private TextView streamingBody;
 
-    private Dialog historyDialog;
+    private LinearLayout historyPanel;
+    private boolean historyOpen;
+    private boolean historyDirty = true;
     private TextView historyStatus;
     private LinearLayout historyRows;
     private MaterialButton historyRetry;
@@ -235,19 +237,6 @@ public final class AiChatView extends LinearLayout {
             menu.show();
         });
 
-        ImageButton history = findViewById(R.id.chat_history);
-        history.setTooltipText(getContext().getString(R.string.chat_history_open));
-        history.setOnClickListener(view -> openHistory());
-        ImageButton newChat = findViewById(R.id.chat_new);
-        newChat.setTooltipText(getContext().getString(R.string.chat_new));
-        newChat.setOnClickListener(view -> startNewChat());
-        findViewById(R.id.chat_open_insights).setOnClickListener(view -> {
-            if (openInsightsListener != null) {
-                prompt.clearFocus();
-                openInsightsListener.run();
-            }
-        });
-
         findViewById(R.id.chat_suggestion_renew).setOnClickListener(
                 view -> useSuggestion(R.string.chat_suggestion_renew));
         findViewById(R.id.chat_suggestion_spend).setOnClickListener(
@@ -263,8 +252,8 @@ public final class AiChatView extends LinearLayout {
         updateSaveControls();
     }
 
-    public void setOnOpenInsightsListener(Runnable listener) {
-        openInsightsListener = listener;
+    public void setOnConversationOpenedListener(Runnable listener) {
+        conversationOpenedListener = listener;
     }
 
     public void setAccessToken(String token) {
@@ -273,9 +262,9 @@ public final class AiChatView extends LinearLayout {
 
     public void setHistoryRepository(ChatHistoryRepository source) {
         historyRepository = source;
+        historyDirty = true;
         updateSaveControls();
-        if (historyDialog != null && historyDialog.isShowing() && historyRepository != null
-                && historyConversations.isEmpty() && !historyLoading) {
+        if (historyOpen && historyRepository != null && !historyLoading) {
             loadConversations(false);
         }
     }
@@ -289,27 +278,23 @@ public final class AiChatView extends LinearLayout {
         return startedConversation;
     }
 
-    public boolean handleBackPress() {
-        if (historyDialog == null || !historyDialog.isShowing()) return false;
-        closeHistory();
-        return true;
-    }
-
+    /** Stops sidebar reads without discarding the loaded list or the conversation draft. */
     public void closeHistory() {
-        Dialog current = historyDialog;
-        if (current == null) return;
+        if (!historyOpen) return;
+        boolean cancelledConversationLoad = loadingConversation;
+        historyOpen = false;
+        if (historyLoading) historyDirty = true;
         historyListGeneration++;
         conversationLoadGeneration++;
-        historyDialog = null;
-        historyStatus = null;
-        historyRows = null;
-        historyRetry = null;
-        historyLoadMore = null;
         conversationToRetry = null;
         historyLoading = false;
         loadingConversation = false;
-        if (current.isShowing()) current.dismiss();
         refreshComposerEnabled();
+        if (cancelledConversationLoad) {
+            feedback.setVisibility(GONE);
+            renderMessages(false);
+        }
+        renderHistoryPanel();
     }
 
     private void useSuggestion(int resource) {
@@ -580,7 +565,7 @@ public final class AiChatView extends LinearLayout {
         }
     }
 
-    private void startNewChat() {
+    public void startNewChat() {
         if (disposed) return;
         boolean wasSending = requestActive;
         if (conversationId == null) draftsByConversation.remove(NEW_CHAT_DRAFT_KEY);
@@ -588,7 +573,8 @@ public final class AiChatView extends LinearLayout {
                 wasSending ? "" : prompt.getText().toString());
         stopActiveTurn();
         if (conversationId != null && wasSending) draftsByConversation.put(conversationId, "");
-        closeHistory();
+        conversationLoadGeneration++;
+        loadingConversation = false;
         conversationId = null;
         endpointConversationId = null;
         conversationTitle = null;
@@ -605,6 +591,7 @@ public final class AiChatView extends LinearLayout {
         setStartedConversation(false);
         updateSaveControls();
         renderMessages(false);
+        renderHistoryPanel();
     }
 
     private void setStartedConversation(boolean started) {
@@ -870,7 +857,8 @@ public final class AiChatView extends LinearLayout {
         if (anotherFailure == null && !requestActive) feedback.setVisibility(GONE);
         updateSaveControls();
         refreshEarlierTurnsControl();
-        if (historyDialog != null && historyDialog.isShowing()) loadConversations(false);
+        historyDirty = true;
+        if (historyOpen && !loadingConversation) loadConversations(false);
     }
 
     private void onTurnSaveFailed(LocalTurn turn, String savedAnswer, boolean savedComplete,
@@ -901,69 +889,59 @@ public final class AiChatView extends LinearLayout {
         if (pendingTurns.isEmpty()) unsavedByConversation.remove(turn.conversationId);
     }
 
-    private void openHistory() {
-        if (disposed) return;
-        if (historyDialog != null && historyDialog.isShowing()) return;
-        historyConversations.clear();
-        historyOffset = 0;
-        historyHasMoreConversations = false;
-        historyLoading = false;
-        historyLoadFailed = false;
-        historyDeleteFailed = false;
-        conversationLoadFailed = false;
-        conversationToRetry = null;
-        createHistoryDialog();
-        renderHistoryPanel();
-        if (historyRepository == null) {
-            historyLoadFailed = true;
-            renderHistoryPanel();
-        } else {
-            loadConversations(false);
-        }
+    /** The application shell hosts this panel below its fixed navigation destinations. */
+    public View getHistoryView() {
+        if (historyPanel == null) createHistoryPanel();
+        return historyPanel;
     }
 
-    private void createHistoryDialog() {
-        Dialog dialog = new Dialog(getContext());
+    public void openHistory() {
+        if (disposed || historyOpen) return;
+        getHistoryView();
+        historyOpen = true;
+        if (historyDirty) loadConversations(false);
+        else renderHistoryPanel();
+    }
+
+    private void createHistoryPanel() {
         LinearLayout panel = new LinearLayout(getContext());
         panel.setOrientation(VERTICAL);
-        panel.setBackgroundResource(R.drawable.chat_history_panel);
-        panel.setPadding(dp(18), dp(16), dp(14), dp(16));
+        panel.setPadding(dp(12), dp(12), dp(12), dp(8));
 
-        LinearLayout header = new LinearLayout(getContext());
-        header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(getContext());
         title.setText(R.string.chat_history_title);
-        title.setTextColor(getContext().getColor(R.color.text_primary));
-        title.setTextSize(20);
+        title.setTextColor(getContext().getColor(R.color.text_secondary));
+        title.setTextSize(13);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        ImageButton close = new ImageButton(getContext());
-        close.setImageResource(R.drawable.ic_chat_close);
-        close.setContentDescription(getContext().getString(R.string.chat_history_close));
-        close.setTooltipText(getContext().getString(R.string.chat_history_close));
-        close.setBackgroundResource(android.R.drawable.list_selector_background);
-        close.setPadding(dp(12), dp(12), dp(12), dp(12));
-        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        panel.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        historyStatus = new TextView(getContext());
-        historyStatus.setTextColor(getContext().getColor(R.color.text_secondary));
-        historyStatus.setTextSize(14);
-        historyStatus.setPadding(dp(4), dp(8), dp(4), dp(10));
-        historyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        panel.addView(historyStatus, new LinearLayout.LayoutParams(
+        title.setPadding(dp(12), 0, dp(12), dp(8));
+        ViewCompat.setAccessibilityHeading(title, true);
+        panel.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         ScrollView historyScroll = new ScrollView(getContext());
-        historyRows = new LinearLayout(getContext());
-        historyRows.setOrientation(VERTICAL);
-        historyScroll.addView(historyRows, new ScrollView.LayoutParams(
+        historyScroll.setId(R.id.chat_history_scroll);
+        historyScroll.setClipToPadding(false);
+        LinearLayout content = new LinearLayout(getContext());
+        content.setOrientation(VERTICAL);
+        historyScroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         panel.addView(historyScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        historyRetry = new MaterialButton(getContext());
+        historyStatus = new TextView(getContext());
+        historyStatus.setTextColor(getContext().getColor(R.color.text_secondary));
+        historyStatus.setTextSize(14);
+        historyStatus.setPadding(dp(12), dp(8), dp(12), dp(10));
+        historyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        content.addView(historyStatus, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        historyRows = new LinearLayout(getContext());
+        historyRows.setOrientation(VERTICAL);
+        content.addView(historyRows, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        historyRetry = Ui.button(getContext(), getContext().getString(R.string.chat_retry), false);
         historyRetry.setText(R.string.chat_retry);
         historyRetry.setAllCaps(false);
         historyRetry.setMinHeight(dp(48));
@@ -972,56 +950,24 @@ public final class AiChatView extends LinearLayout {
             if (conversationToRetry != null) openConversation(conversationToRetry);
             else loadConversations(false);
         });
-        panel.addView(historyRetry, new LinearLayout.LayoutParams(
+        content.addView(historyRetry, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        historyLoadMore = new MaterialButton(getContext());
+        historyLoadMore = Ui.button(getContext(), getContext().getString(R.string.chat_history_load_more), false);
         historyLoadMore.setText(R.string.chat_history_load_more);
         historyLoadMore.setAllCaps(false);
         historyLoadMore.setMinHeight(dp(48));
         historyLoadMore.setVisibility(GONE);
         historyLoadMore.setOnClickListener(view -> loadConversations(true));
-        panel.addView(historyLoadMore, new LinearLayout.LayoutParams(
+        content.addView(historyLoadMore, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        close.setOnClickListener(view -> closeHistory());
-        dialog.setContentView(panel);
-        dialog.setCancelable(true);
-        dialog.setCanceledOnTouchOutside(true);
-        dialog.setOnDismissListener(ignored -> {
-            if (historyDialog == dialog) {
-                historyDialog = null;
-                historyStatus = null;
-                historyRows = null;
-                historyRetry = null;
-                historyLoadMore = null;
-                historyListGeneration++;
-                conversationLoadGeneration++;
-                historyLoading = false;
-                loadingConversation = false;
-                conversationToRetry = null;
-                refreshComposerEnabled();
-            }
-        });
-        historyDialog = dialog;
-        dialog.show();
-
-        Window window = dialog.getWindow();
-        if (window != null) {
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int panelWidth = Math.min(dp(360), Math.round(screenWidth * 0.88f));
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            WindowManager.LayoutParams attributes = window.getAttributes();
-            attributes.gravity = Gravity.START | Gravity.TOP;
-            attributes.dimAmount = 0.55f;
-            window.setAttributes(attributes);
-            window.setLayout(panelWidth, WindowManager.LayoutParams.MATCH_PARENT);
-        }
+        historyPanel = panel;
+        renderHistoryPanel();
     }
 
     private void loadConversations(boolean append) {
-        if (historyRepository == null || historyDialog == null || !historyDialog.isShowing()) {
+        if (disposed || !historyOpen) return;
+        if (historyRepository == null) {
             historyLoadFailed = true;
             renderHistoryPanel();
             return;
@@ -1050,7 +996,7 @@ public final class AiChatView extends LinearLayout {
                             requestedOffset, CONVERSATION_PAGE_SIZE);
                     mainHandler.post(() -> {
                         if (disposed || requestGeneration != historyListGeneration
-                                || historyDialog == null || !historyDialog.isShowing()) return;
+                                || !historyOpen) return;
                         if (!append) historyConversations.clear();
                         for (ChatConversation item : page) {
                             boolean duplicate = false;
@@ -1067,12 +1013,13 @@ public final class AiChatView extends LinearLayout {
                         historyLoading = false;
                         historyLoadFailed = false;
                         historyDeleteFailed = false;
+                        if (!append) historyDirty = false;
                         renderHistoryPanel();
                     });
                 } catch (ApiException error) {
                     mainHandler.post(() -> {
                         if (disposed || requestGeneration != historyListGeneration
-                                || historyDialog == null || !historyDialog.isShowing()) return;
+                                || !historyOpen) return;
                         historyLoading = false;
                         historyLoadFailed = true;
                         renderHistoryPanel();
@@ -1106,6 +1053,7 @@ public final class AiChatView extends LinearLayout {
         } else {
             historyStatus.setText("");
         }
+        historyStatus.setVisibility(historyStatus.getText().length() == 0 ? GONE : VISIBLE);
 
         for (ChatConversation conversation : historyConversations) addHistoryRow(conversation);
         historyRetry.setVisibility(historyLoadFailed || conversationLoadFailed ? VISIBLE : GONE);
@@ -1134,17 +1082,22 @@ public final class AiChatView extends LinearLayout {
         title.setTextColor(getContext().getColor(R.color.text_primary));
         title.setTextSize(15);
         title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        boolean selected = conversation.getId().equals(conversationId);
+        item.setSelected(selected);
+        if (selected) title.setTextColor(getContext().getColor(R.color.brand_blue));
         item.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         TextView hint = new TextView(getContext());
-        hint.setText(R.string.chat_history_open_hint);
+        hint.setText(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(
+                conversation.getUpdatedAt().atZoneSameInstant(ZoneId.systemDefault())));
         hint.setTextColor(getContext().getColor(R.color.text_secondary));
         hint.setTextSize(12);
         hint.setPadding(0, dp(3), 0, 0);
         item.addView(hint, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         item.setContentDescription(titleText + ", " + getContext().getString(R.string.chat_history_open_hint));
-        item.setEnabled(!deletingConversationIds.contains(conversation.getId()));
+        item.setEnabled(!historyLoading && !deletingConversationIds.contains(conversation.getId()));
         item.setOnClickListener(view -> {
             if (!deletingConversationIds.contains(conversation.getId())) openConversation(conversation);
         });
@@ -1152,7 +1105,7 @@ public final class AiChatView extends LinearLayout {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         ImageButton delete = new ImageButton(getContext());
-        delete.setImageResource(R.drawable.ic_chat_delete);
+        delete.setImageResource(R.drawable.ic_action_delete);
         delete.setColorFilter(getContext().getColor(R.color.text_secondary));
         delete.setContentDescription(getContext().getString(R.string.chat_history_delete) + ": " + titleText);
         delete.setTooltipText(getContext().getString(R.string.chat_history_delete));
@@ -1229,17 +1182,16 @@ public final class AiChatView extends LinearLayout {
         draftsByConversation.remove(deletedId);
         endpointIdsByConversation.remove(deletedId);
         updateSaveControls();
-        if (wasCurrent) {
-            return;
-        }
+        historyDirty = true;
         renderHistoryPanel();
         loadConversations(false);
     }
 
     private void openConversation(ChatConversation conversation) {
-        if (conversation == null || historyRepository == null || historyDialog == null) return;
+        if (conversation == null || historyRepository == null || !historyOpen) return;
         if (conversation.getId().equals(conversationId)) {
             closeHistory();
+            if (conversationOpenedListener != null) conversationOpenedListener.run();
             return;
         }
         draftsByConversation.put(draftKey(), prompt.getText().toString());
@@ -1274,7 +1226,7 @@ public final class AiChatView extends LinearLayout {
                     Collections.reverse(ordered);
                     mainHandler.post(() -> {
                         if (disposed || requestGeneration != conversationLoadGeneration
-                                || historyDialog == null || !historyDialog.isShowing()) return;
+                                || !historyOpen) return;
                         conversationId = requestedConversationId;
                         conversationTitle = conversation.getTitle();
                         endpointConversationId = endpointIdsByConversation.get(conversationId);
@@ -1297,11 +1249,12 @@ public final class AiChatView extends LinearLayout {
                         feedback.setVisibility(GONE);
                         closeHistory();
                         renderMessages(true);
+                        if (conversationOpenedListener != null) conversationOpenedListener.run();
                     });
                 } catch (ApiException error) {
                     mainHandler.post(() -> {
                         if (disposed || requestGeneration != conversationLoadGeneration
-                                || historyDialog == null || !historyDialog.isShowing()) return;
+                                || !historyOpen) return;
                         loadingConversation = false;
                         refreshComposerEnabled();
                         historyLoading = false;
@@ -1728,12 +1681,6 @@ public final class AiChatView extends LinearLayout {
             conversationStateChangedListener.accept(startedConversation);
         }
         updateSaveControls();
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        closeHistory();
-        super.onDetachedFromWindow();
     }
 
     public void dispose() {

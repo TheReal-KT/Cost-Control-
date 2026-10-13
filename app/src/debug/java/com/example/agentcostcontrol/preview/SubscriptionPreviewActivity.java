@@ -11,9 +11,11 @@ import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
+import androidx.core.view.GravityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
 
 import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.domain.FinancialSummary;
@@ -25,7 +27,7 @@ import com.example.agentcostcontrol.ui.HomeScreen;
 import com.example.agentcostcontrol.ui.MoneyText;
 import com.example.agentcostcontrol.ui.ServicesScreen;
 import com.example.agentcostcontrol.ui.Ui;
-import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.navigation.NavigationView;
 
 import java.math.BigDecimal;
 import java.time.YearMonth;
@@ -37,7 +39,8 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
     private final List<Subscription> subscriptions = PreviewSubscriptions.create();
     private FrameLayout container;
     private TextView title;
-    private BottomNavigationView navigation;
+    private NavigationView navigation;
+    private DrawerLayout drawer;
     private String query = "";
     private String filter = "All";
     private boolean showingHome;
@@ -50,32 +53,43 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
         WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
                 .setAppearanceLightNavigationBars(false);
         setContentView(R.layout.activity_main);
-        LinearLayout root = findViewById(R.id.app_root);
-        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+        drawer = findViewById(R.id.app_root);
+        LinearLayout content = findViewById(R.id.main_content);
+        View sidebar = findViewById(R.id.navigation_sidebar);
+        ViewCompat.setOnApplyWindowInsetsListener(drawer, (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
-            view.setPadding(0, bars.top, 0, bars.bottom);
+            content.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            sidebar.setPadding(bars.left, bars.top, 0, bars.bottom);
             return insets;
         });
         TextView banner = Ui.text(this, "DEMO · Fictional subscriptions and prices", 12,
                 Ui.color(this, R.color.text_secondary), false);
         banner.setPadding(Ui.dp(this, 20), Ui.dp(this, 4), Ui.dp(this, 20), Ui.dp(this, 8));
-        root.addView(banner, 1, new LinearLayout.LayoutParams(-1, -2));
+        content.addView(banner, 1, new LinearLayout.LayoutParams(-1, -2));
         container = findViewById(R.id.screen_container);
         title = findViewById(R.id.screen_title);
-        navigation = findViewById(R.id.bottom_navigation);
+        navigation = findViewById(R.id.sidebar_navigation);
         navigation.getMenu().findItem(R.id.nav_reminders).setVisible(false);
-        navigation.getMenu().findItem(R.id.nav_ai).setVisible(false);
+        navigation.getMenu().findItem(R.id.nav_chat).setVisible(false);
+        navigation.getMenu().findItem(R.id.nav_insights).setVisible(false);
         navigation.getMenu().findItem(R.id.nav_profile).setVisible(false);
-        navigation.setOnItemSelectedListener(item -> {
+        findViewById(R.id.chat_new).setVisibility(View.GONE);
+        findViewById(R.id.sidebar_history).setVisibility(View.GONE);
+        findViewById(R.id.navigation_open).setVisibility(View.VISIBLE);
+        findViewById(R.id.navigation_open).setOnClickListener(view -> drawer.openDrawer(GravityCompat.START));
+        findViewById(R.id.navigation_close).setOnClickListener(view -> drawer.closeDrawer(GravityCompat.START));
+        navigation.setNavigationItemSelectedListener(item -> {
             if (item.getItemId() == R.id.nav_subscriptions) showServices();
             else showHome();
+            drawer.closeDrawer(GravityCompat.START);
             return true;
         });
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
-                if (showingHome) finish();
-                else navigation.setSelectedItemId(R.id.nav_dashboard);
+                if (drawer.isDrawerVisible(GravityCompat.START)) drawer.closeDrawer(GravityCompat.START);
+                else if (showingHome) finish();
+                else showHome();
             }
         });
         showHome();
@@ -83,6 +97,7 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
 
     private void showHome() {
         showingHome = true;
+        navigation.setCheckedItem(R.id.nav_dashboard);
         FinancialSummary summary = FinancialSummaryCalculator.calculate(subscriptions);
         YearMonth month = YearMonth.now();
         List<Budget> budgets = Collections.singletonList(new Budget(1, 1,
@@ -92,7 +107,7 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
                 new HomeScreen.Actions() {
                     @Override public void onAddService() { explainReadOnly(); }
                     @Override public void onAddReminder() { explainReadOnly(); }
-                    @Override public void onOpenServices() { navigation.setSelectedItemId(R.id.nav_subscriptions); }
+                    @Override public void onOpenServices() { showServices(); }
                     @Override public void onOpenReminders() { explainReadOnly(); }
                     @Override public void onOpenService(Subscription service) { showDetail(service); }
                     @Override public void onOpenReminder(Reminder reminder) { explainReadOnly(); }
@@ -101,6 +116,7 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
 
     private void showServices() {
         showingHome = false;
+        navigation.setCheckedItem(R.id.nav_subscriptions);
         show("Services preview", ServicesScreen.create(this, subscriptions, query, filter, false,
                 new ServicesScreen.Actions() {
                     @Override public void onAdd() { explainReadOnly(); }
