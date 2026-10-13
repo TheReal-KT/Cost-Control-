@@ -16,7 +16,10 @@ public interface ChatHistoryRepository {
     List<ChatTurn> listTurns(ChatHistoryScope scope, String conversationId, int offset, int limit)
             throws ApiException;
 
-    /** Saves or updates a paired user/assistant turn using stable client-generated UUIDs. */
+    /**
+     * Saves using stable client-generated UUIDs and returns the canonical stored turn.
+     * An already-completed server answer can be preserved against an incomplete retry.
+     */
     ChatTurn saveTurn(ChatHistoryScope scope, String conversationId, String turnId, String title,
                       String question, String answer, boolean complete) throws ApiException;
 

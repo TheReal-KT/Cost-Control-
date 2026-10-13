@@ -279,6 +279,118 @@ public final class ChatAndAuthTest {
         });
     }
 
+    @Test
+    public void saveRetryDisplaysCanonicalCompletedAnswerImmediately() throws Exception {
+        String conversationId = UUID.randomUUID().toString();
+        String turnId = UUID.randomUUID().toString();
+        String question = "Explain this bill";
+        String canonicalAnswer = "The complete answer already saved by the server.";
+        FakeChatHistoryRepository history = new FakeChatHistoryRepository(
+                conversationId, turnId, "Saved chat", question, canonicalAnswer, true);
+        history.canonicalSaveResult = history.turn;
+        history.saveFinished = new CountDownLatch(1);
+        AtomicReference<AiChatView> chatReference = new AtomicReference<>();
+        try {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                Context context = new ContextThemeWrapper(
+                        InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                        R.style.Theme_AgentCostControl);
+                AiChatView chat = new AiChatView(context);
+                chatReference.set(chat);
+                chat.setHistoryRepository(history);
+                chat.restoreState(singleTurnState(conversationId, turnId, "Saved chat",
+                        question, "An older partial answer", false));
+                chat.findViewById(R.id.chat_retry_save).performClick();
+            });
+            assertTrue("Save retry did not finish", history.saveFinished.await(5, TimeUnit.SECONDS));
+            waitForVisibility(chatReference.get(), R.id.chat_retry_save, View.GONE);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                AiChatView chat = chatReference.get();
+                TextView answer = chat.findViewWithTag("chat_assistant_message");
+                assertEquals(canonicalAnswer, answer.getText().toString());
+                Bundle saved = chat.saveState();
+                assertEquals(Collections.singletonList(canonicalAnswer), saved.getStringArrayList("turn_answers"));
+                assertTrue(saved.getBooleanArray("turn_complete")[0]);
+                assertTrue(saved.getBooleanArray("turn_persisted")[0]);
+                assertTrue(saved.getStringArrayList("pending_turn_ids").isEmpty());
+            });
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                if (chatReference.get() != null) chatReference.get().dispose();
+            });
+        }
+    }
+
+    @Test
+    public void persistedRetryReservesItsFullFootprintBeforeStartingInference() {
+        Assume.assumeTrue(BuildConfig.AI_ENDPOINT_URL.startsWith("https://"));
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Context context = new ContextThemeWrapper(
+                    InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                    R.style.Theme_AgentCostControl);
+            String turnId = UUID.randomUUID().toString();
+            Bundle state = singleTurnState(UUID.randomUUID().toString(), turnId,
+                    repeat('t', 80), "q", "Partial answer", true);
+            // These three failed saves occupy exactly 33,900 characters of the 50,000 limit.
+            ArrayList<String> pendingIds = new ArrayList<>();
+            ArrayList<String> pendingConversations = new ArrayList<>();
+            for (int index = 0; index < 3; index++) {
+                pendingIds.add(UUID.randomUUID().toString());
+                pendingConversations.add(UUID.randomUUID().toString());
+            }
+            state.putStringArrayList("pending_turn_ids", pendingIds);
+            state.putStringArrayList("pending_conversation_ids", pendingConversations);
+            state.putStringArrayList("pending_titles", new ArrayList<>(Collections.nCopies(3, "t")));
+            state.putStringArrayList("pending_questions", new ArrayList<>(Collections.nCopies(3, "q")));
+            ArrayList<String> pendingAnswers = new ArrayList<>();
+            pendingAnswers.add(repeat('a', 16_000));
+            pendingAnswers.add(repeat('b', 16_000));
+            pendingAnswers.add(repeat('c', 1_678));
+            state.putStringArrayList("pending_answers", pendingAnswers);
+            state.putBooleanArray("pending_complete", new boolean[]{false, false, false});
+            state.putBooleanArray("pending_remote_exists", new boolean[]{true, true, true});
+            AiChatView chat = new AiChatView(context);
+            try {
+                chat.restoreState(state);
+                chat.setAccessToken("synthetic-test-token");
+                ((EditText) chat.findViewById(R.id.chat_prompt)).setText("q");
+                chat.findViewById(R.id.chat_send).performClick();
+                assertEquals(context.getString(R.string.chat_pending_saves_limit),
+                        ((TextView) chat.findViewById(R.id.chat_feedback)).getText().toString());
+                Bundle saved = chat.saveState();
+                assertTrue(saved.getBooleanArray("turn_persisted")[0]);
+                assertEquals(3, saved.getStringArrayList("pending_turn_ids").size());
+                AiChatView restored = new AiChatView(context);
+                try {
+                    restored.restoreState(saved);
+                    Bundle roundTrip = restored.saveState();
+                    assertTrue(roundTrip.getStringArrayList("pending_turn_ids").containsAll(pendingIds));
+                    assertEquals(3, roundTrip.getStringArrayList("pending_turn_ids").size());
+                } finally {
+                    restored.dispose();
+                }
+            } finally {
+                chat.dispose();
+            }
+        });
+    }
+
+    private static Bundle singleTurnState(String conversationId, String turnId, String title,
+                                           String question, String answer, boolean persisted) {
+        Bundle state = new Bundle();
+        state.putString("conversation_id", conversationId);
+        state.putString("conversation_title", title);
+        state.putBoolean("started", true);
+        state.putStringArrayList("turn_ids", new ArrayList<>(Collections.singletonList(turnId)));
+        state.putStringArrayList("turn_questions", new ArrayList<>(Collections.singletonList(question)));
+        state.putStringArrayList("turn_answers", new ArrayList<>(Collections.singletonList(answer)));
+        state.putBooleanArray("turn_complete", new boolean[]{false});
+        state.putBooleanArray("turn_persisted", new boolean[]{persisted});
+        state.putBooleanArray("turn_remote_exists", new boolean[]{true});
+        state.putBooleanArray("turn_save_failed", new boolean[]{!persisted});
+        return state;
+    }
+
     private static String repeat(char value, int count) {
         StringBuilder result = new StringBuilder(count);
         for (int index = 0; index < count; index++) result.append(value);
@@ -676,6 +788,7 @@ public final class ChatAndAuthTest {
         private volatile CountDownLatch allowDeleteToFinish;
         private volatile CountDownLatch emptyHistoryLoaded;
         private volatile CountDownLatch saveFinished;
+        private volatile ChatTurn canonicalSaveResult;
         private volatile String lastSavedConversationId;
         private volatile String lastSavedTurnId;
         private volatile String lastSavedQuestion;
@@ -733,6 +846,7 @@ public final class ChatAndAuthTest {
             lastSavedComplete = complete;
             OffsetDateTime now = OffsetDateTime.now();
             if (saveFinished != null) saveFinished.countDown();
+            if (canonicalSaveResult != null) return canonicalSaveResult;
             return new ChatTurn(conversationId, turnId, question, answer, complete, now, now);
         }
 

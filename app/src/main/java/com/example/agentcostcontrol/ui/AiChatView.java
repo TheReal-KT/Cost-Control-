@@ -332,12 +332,17 @@ public final class AiChatView extends LinearLayout {
                 && retryableTurn.question.equals(question) && !retryableTurn.complete
                 ? retryableTurn : null;
         int pendingChars = pendingTurnStateCharacters();
-        int projectedPendingChars = pendingChars + pendingTurnStateCharactersForNew(question);
+        int projectedPendingChars = pendingChars;
         int projectedPendingCount = pendingTurnCount();
-        if (reusableTurn != null && !reusableTurn.persisted) {
-            projectedPendingChars = pendingChars + Math.max(0, 16_000 - reusableTurn.answer.length());
-        } else {
+        if (reusableTurn == null) {
+            projectedPendingChars += pendingTurnStateCharactersForNew(question);
             projectedPendingCount++;
+        } else if (reusableTurn.persisted) {
+            // This saved turn becomes pending again; include its existing title and identifiers.
+            projectedPendingChars += turnStateCharacters(reusableTurn) - reusableTurn.answer.length() + 16_000;
+            projectedPendingCount++;
+        } else {
+            projectedPendingChars += Math.max(0, 16_000 - reusableTurn.answer.length());
         }
         if (projectedPendingChars > MAX_PENDING_STATE_CHARS || projectedPendingCount > MAX_PENDING_TURNS) {
             showFeedback(R.string.chat_pending_saves_limit);
@@ -733,10 +738,10 @@ public final class AiChatView extends LinearLayout {
         try {
             historyWorker.execute(() -> {
                 try {
-                    source.saveTurn(scope, savedConversationId, savedTurnId, savedTitle,
+                    ChatTurn canonicalTurn = source.saveTurn(scope, savedConversationId, savedTurnId, savedTitle,
                             savedQuestion, savedAnswer, savedComplete);
-                    mainHandler.post(() -> onTurnSaved(turn, savedAnswer, savedComplete,
-                            savedRevision, saveAttempt));
+                    mainHandler.post(() -> onTurnSaved(turn, canonicalTurn, savedAnswer,
+                            savedComplete, savedRevision, saveAttempt));
                 } catch (ApiException error) {
                     mainHandler.post(() -> onTurnSaveFailed(turn, savedAnswer, savedComplete,
                             savedRevision, saveAttempt));
@@ -761,8 +766,8 @@ public final class AiChatView extends LinearLayout {
         pendingTurns.add(turn);
     }
 
-    private void onTurnSaved(LocalTurn turn, String savedAnswer, boolean savedComplete,
-                             long savedRevision, long saveAttempt) {
+    private void onTurnSaved(LocalTurn turn, ChatTurn canonicalTurn, String savedAnswer,
+                             boolean savedComplete, long savedRevision, long saveAttempt) {
         if (disposed) return;
         boolean wasRemote = turn.remoteExists;
         turn.remoteExists = true;
@@ -771,10 +776,17 @@ public final class AiChatView extends LinearLayout {
             refreshEarlierTurnsControl();
             return;
         }
+        boolean contentChanged = !turn.answer.equals(canonicalTurn.getAnswer())
+                || turn.complete != canonicalTurn.isComplete();
+        turn.answer = canonicalTurn.getAnswer();
+        turn.complete = canonicalTurn.isComplete();
+        if (contentChanged) turn.contentRevision++;
+        if (retryableTurn == turn && turn.complete) retryableTurn = null;
         turn.persisted = true;
         turn.saving = false;
         turn.saveFailed = false;
         removeUnsavedTurn(turn);
+        if (contentChanged && transcript.contains(turn)) renderMessages(false);
         LocalTurn anotherFailure = findFailedSave();
         if (anotherFailure == null && !requestActive) feedback.setVisibility(GONE);
         updateSaveControls();
