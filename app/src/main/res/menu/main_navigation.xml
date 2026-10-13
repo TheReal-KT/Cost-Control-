@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/nav_dashboard" android:icon="@drawable/ic_nav_home" android:title="@string/home" />
-    <item android:id="@+id/nav_subscriptions" android:icon="@drawable/ic_nav_services" android:title="@string/services" />
-    <item android:id="@+id/nav_reminders" android:icon="@drawable/ic_nav_reminders" android:title="@string/reminders" />
-    <item android:id="@+id/nav_ai" android:icon="@drawable/ic_nav_ai" android:title="@string/ai" />
-    <item android:id="@+id/nav_profile" android:icon="@drawable/ic_nav_profile" android:title="@string/profile" />
+    <group android:checkableBehavior="single">
+        <item android:id="@+id/nav_dashboard" android:icon="@drawable/ic_nav_home" android:title="@string/home" />
+        <item android:id="@+id/nav_subscriptions" android:icon="@drawable/ic_nav_services" android:title="@string/services" />
+        <item android:id="@+id/nav_reminders" android:icon="@drawable/ic_nav_reminders" android:title="@string/reminders" />
+        <item android:id="@+id/nav_chat" android:icon="@drawable/ic_nav_ai" android:title="@string/ai" />
+        <item android:id="@+id/nav_insights" android:icon="@drawable/ic_nav_insights" android:title="@string/recommendations" />
+        <item android:id="@+id/nav_profile" android:icon="@drawable/ic_nav_profile" android:title="@string/profile" />
+    </group>
 </menu>

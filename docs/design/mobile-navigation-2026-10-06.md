@@ -1,5 +1,7 @@
 # Agent Cost Control — mobile navigation design
 
+**13 October update:** the [shared sidebar design](sidebar-navigation-2026-10-13.md) supersedes this proposal's bottom bar and combined AI root. Home, Services, Reminders, AI (chat), Insights and Profile are now separate sidebar destinations, with scrollable chat history below navigation. The task, form, data and authentication contracts below still apply.
+
 **Review date:** 7 October 2026
 
 **Status:** framework-neutral design specification updated for the AI tab; Paper canvas is partial because the Paper MCP weekly limit stopped further edits.

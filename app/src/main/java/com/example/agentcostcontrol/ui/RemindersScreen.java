@@ -1,6 +1,7 @@
 package com.example.agentcostcontrol.ui;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -9,6 +10,7 @@ import com.example.agentcostcontrol.R;
 import com.example.agentcostcontrol.model.Reminder;
 import com.example.agentcostcontrol.model.ReminderStatus;
 import com.example.agentcostcontrol.model.Subscription;
+import com.google.android.material.button.MaterialButton;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
 
@@ -103,6 +105,9 @@ public final class RemindersScreen {
         page.addView(reschedule, margin(context, 0, 0, 0, 8));
         com.google.android.material.button.MaterialButton delete = Ui.textButton(context, "Delete reminder");
         delete.setTextColor(Ui.color(context, R.color.danger));
+        delete.setIconResource(R.drawable.ic_action_delete);
+        delete.setIconTint(ColorStateList.valueOf(Ui.color(context, R.color.danger)));
+        delete.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
         delete.setOnClickListener(view -> actions.onDelete());
         page.addView(delete, margin(context, 0, 0, 0, 12));
         return Ui.scroll(context, page);

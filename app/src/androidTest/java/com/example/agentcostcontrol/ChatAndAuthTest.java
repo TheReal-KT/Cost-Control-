@@ -10,6 +10,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ContextThemeWrapper;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -62,7 +63,7 @@ import static org.junit.Assert.assertTrue;
 @RunWith(AndroidJUnit4.class)
 public final class ChatAndAuthTest {
     @Test
-    public void chatIntroducesColeAndKeepsInsightsAndNewChatAccessible() {
+    public void newChatClearsTheComposerAndRestoresColesIntroduction() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             Context context = new ContextThemeWrapper(
                     InstrumentationRegistry.getInstrumentation().getTargetContext(),
@@ -71,12 +72,10 @@ public final class ChatAndAuthTest {
             try {
                 assertEquals("Hi, I’m Cole.", ((TextView) chat.findViewById(R.id.chat_empty))
                         .getText().toString());
-                AtomicInteger opened = new AtomicInteger();
-                chat.setOnOpenInsightsListener(opened::incrementAndGet);
-                chat.findViewById(R.id.chat_open_insights).performClick();
-                assertEquals(1, opened.get());
-                assertEquals("New chat", chat.findViewById(R.id.chat_new)
-                        .getContentDescription().toString());
+                ((EditText) chat.findViewById(R.id.chat_prompt)).setText("An unsent question");
+                chat.startNewChat();
+                assertEquals("", ((EditText) chat.findViewById(R.id.chat_prompt)).getText().toString());
+                assertEquals(View.VISIBLE, chat.findViewById(R.id.chat_empty_state).getVisibility());
             } finally {
                 chat.dispose();
             }
@@ -128,10 +127,10 @@ public final class ChatAndAuthTest {
         // Run on a fresh emulator installation without an existing signed-in session.
         try (ActivityScenario<MainActivity> ignored = ActivityScenario.launch(MainActivity.class)) {
             onView(withId(R.id.auth_email)).check(matches(isDisplayed()));
-            onView(withId(R.id.bottom_navigation)).check(matches(withEffectiveVisibility(GONE)));
+            onView(withId(R.id.navigation_open)).check(matches(withEffectiveVisibility(GONE)));
             onView(withId(R.id.auth_primary_action)).perform(click());
             onView(withId(R.id.auth_email)).check(matches(isDisplayed()));
-            onView(withId(R.id.bottom_navigation)).check(matches(withEffectiveVisibility(GONE)));
+            onView(withId(R.id.navigation_open)).check(matches(withEffectiveVisibility(GONE)));
         }
     }
 
@@ -160,7 +159,7 @@ public final class ChatAndAuthTest {
             pressBack();
             onView(withId(R.id.auth_switch_mode)).check(matches(isDisplayed()));
             onView(withId(R.id.auth_first_name)).check(doesNotExist());
-            onView(withId(R.id.bottom_navigation)).check(matches(withEffectiveVisibility(GONE)));
+            onView(withId(R.id.navigation_open)).check(matches(withEffectiveVisibility(GONE)));
         }
     }
 
@@ -522,14 +521,13 @@ public final class ChatAndAuthTest {
                     AiChatView chat = new AiChatView(activity);
                     chat.setHistoryRepository(history);
                     chat.setOnConversationStateChangedListener(lastStartedState::set);
-                    activity.addContentView(chat, new ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    showChatWithHistory(activity, chat);
                     chatReference.set(chat);
-                    chat.findViewById(R.id.chat_history).performClick();
+                    chat.openHistory();
                 });
 
                 assertTrue("History request did not finish", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDialogText(title);
+                waitForDisplayed(title);
                 onView(withText(title)).perform(click());
                 assertTrue("Turn request did not finish", turnsLoaded.await(5, TimeUnit.SECONDS));
                 waitForDisplayed(question);
@@ -546,7 +544,7 @@ public final class ChatAndAuthTest {
                     assertTrue(chat.hasStartedConversation());
                     assertEquals(Boolean.TRUE, lastStartedState.get());
 
-                    chat.findViewById(R.id.chat_new).performClick();
+                    chat.startNewChat();
                     assertFalse(chat.hasStartedConversation());
                     assertEquals(Boolean.FALSE, lastStartedState.get());
                     assertEquals(View.VISIBLE, chat.findViewById(R.id.chat_empty_state).getVisibility());
@@ -596,14 +594,13 @@ public final class ChatAndAuthTest {
                     AiChatView chat = new AiChatView(activity);
                     chat.setHistoryRepository(history);
                     chat.restoreState(state);
-                    activity.addContentView(chat, new ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    showChatWithHistory(activity, chat);
                     chatReference.set(chat);
-                    chat.findViewById(R.id.chat_history).performClick();
+                    chat.openHistory();
                 });
 
                 assertTrue("History list did not load", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDialogText("Updated sample chat");
+                waitForDisplayed("Updated sample chat");
                 onView(withText("Updated sample chat")).perform(click());
                 assertTrue("Remote turn did not load", turnsLoaded.await(5, TimeUnit.SECONDS));
                 waitForDisplayed(localAnswer);
@@ -637,14 +634,13 @@ public final class ChatAndAuthTest {
                 scenario.onActivity(activity -> {
                     AiChatView chat = new AiChatView(activity);
                     chat.setHistoryRepository(history);
-                    activity.addContentView(chat, new ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    showChatWithHistory(activity, chat);
                     chatReference.set(chat);
-                    chat.findViewById(R.id.chat_history).performClick();
+                    chat.openHistory();
                 });
 
                 assertTrue("History request did not finish", initialListLoaded.await(5, TimeUnit.SECONDS));
-                waitForDialogText(title);
+                waitForDisplayed(title);
                 String deleteDescription = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_delete) + ": " + title;
                 onView(withContentDescription(deleteDescription)).perform(click());
@@ -654,7 +650,7 @@ public final class ChatAndAuthTest {
                 String confirmation = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_delete_message);
                 waitForTextToDisappear(confirmation);
-                waitForDialogText(title);
+                waitForDisplayed(title);
 
                 onView(withContentDescription(deleteDescription)).perform(click());
                 waitForDialogText(confirmation);
@@ -713,14 +709,13 @@ public final class ChatAndAuthTest {
                     AiChatView chat = new AiChatView(activity);
                     chat.setHistoryRepository(history);
                     chat.restoreState(state);
-                    activity.addContentView(chat, new ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    showChatWithHistory(activity, chat);
                     chatReference.set(chat);
-                    chat.findViewById(R.id.chat_history).performClick();
+                    chat.openHistory();
                 });
 
                 assertTrue("History list did not load", conversationsLoaded.await(5, TimeUnit.SECONDS));
-                waitForDialogText(title);
+                waitForDisplayed(title);
                 String deleteDescription = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_delete) + ": " + title;
                 onView(withContentDescription(deleteDescription)).perform(click());
@@ -730,6 +725,7 @@ public final class ChatAndAuthTest {
                 scenario.onActivity(activity -> {
                     AiChatView chat = chatReference.get();
                     chat.closeHistory();
+                    chat.getHistoryView().setVisibility(View.GONE);
                     View retry = chat.findViewById(R.id.chat_retry_save);
                     assertEquals(View.VISIBLE, retry.getVisibility());
                     assertFalse("Retry stayed enabled while DELETE was pending", retry.isEnabled());
@@ -776,19 +772,18 @@ public final class ChatAndAuthTest {
                 scenario.onActivity(activity -> {
                     AiChatView chat = new AiChatView(activity);
                     chat.setHistoryRepository(history);
-                    activity.addContentView(chat, new ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    showChatWithHistory(activity, chat);
                     chatReference.set(chat);
-                    chat.findViewById(R.id.chat_history).performClick();
+                    chat.openHistory();
                 });
 
                 assertTrue("History request did not finish", firstLoad.await(5, TimeUnit.SECONDS));
                 String failure = InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_load_failed);
-                waitForDialogText(failure);
+                waitForDisplayed(failure);
                 onView(withText(R.string.chat_retry)).perform(click());
                 assertTrue("Retry did not finish", retryLoad.await(5, TimeUnit.SECONDS));
-                waitForDialogText(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                waitForDisplayed(InstrumentationRegistry.getInstrumentation().getTargetContext()
                         .getString(R.string.chat_history_empty));
             } finally {
                 scenario.onActivity(activity -> {
@@ -799,8 +794,20 @@ public final class ChatAndAuthTest {
         }
     }
 
+    private static void showChatWithHistory(MainActivity activity, AiChatView chat) {
+        FrameLayout host = new FrameLayout(activity);
+        host.addView(chat, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        View history = chat.getHistoryView();
+        history.setBackgroundColor(activity.getColor(R.color.surface_raised));
+        host.addView(history, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        chat.setOnConversationOpenedListener(() -> history.setVisibility(View.GONE));
+        activity.addContentView(host, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
     private static void waitForDialogText(String text) {
-        // The activity loses focus while history/confirmation dialogs are opening.
         onView(withText(text)).inRoot(isDialog()).check(matches(isDisplayed()));
     }
 

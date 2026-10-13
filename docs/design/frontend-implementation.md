@@ -1,5 +1,7 @@
 # Quickest route to a premium Agent Cost Control frontend
 
+**13 October navigation update:** the implemented [shared sidebar](sidebar-navigation-2026-10-13.md) replaces the bottom bar and Chat/Insights switcher proposed below. Chat and Insights are separate destinations; saved chat history is available below the sidebar navigation.
+
 Decision date: 6 October 2026. This records the original implementation plan. Native Java/XML screens, compact Chat and local risk checks were implemented during the 6–7 October catch-up; see [the verification record](../catchup-2026-10-06.md) for actual checks and outstanding acceptance work. Motion values and streaming/source-link components below remain proposals unless that record says otherwise.
 
 ## Recommended stack

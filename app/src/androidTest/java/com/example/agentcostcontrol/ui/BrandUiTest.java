@@ -136,8 +136,9 @@ public final class BrandUiTest {
                 assertNotNull(findText(root, "Netflix"));
                 assertNotNull(findText(root, "ChatGPT Plus"));
                 capture(activity, root, "preview-home", 390, 840);
-                ((com.google.android.material.bottomnavigation.BottomNavigationView)
-                        activity.findViewById(R.id.bottom_navigation)).setSelectedItemId(R.id.nav_subscriptions);
+                ((com.google.android.material.navigation.NavigationView)
+                        activity.findViewById(R.id.sidebar_navigation)).getMenu()
+                        .performIdentifierAction(R.id.nav_subscriptions, 0);
                 assertNotNull(findText(root, "Canva Pro"));
                 assertNotNull(findText(root, "Independent design tools"));
                 capture(activity, root, "preview-services", 390, 1200);
