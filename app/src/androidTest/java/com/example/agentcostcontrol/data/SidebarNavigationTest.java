@@ -5,8 +5,12 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Gravity;
 
+import androidx.core.graphics.Insets;
 import androidx.core.view.GravityCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.test.core.app.ActivityScenario;
@@ -61,6 +65,37 @@ import static org.junit.Assert.assertTrue;
 /** Exercises the real activity and repository with a read-only, in-memory account. */
 @RunWith(AndroidJUnit4.class)
 public final class SidebarNavigationTest {
+    @Test public void sidebarInsetsFollowThePhysicalStartEdgeInBothLayoutDirections() throws Exception {
+        try (ActivityScenario<MainActivity> scenario = launchAccount(new ReadOnlyAccount())) {
+            scenario.onActivity(activity -> {
+                DrawerLayout drawer = activity.findViewById(R.id.app_root);
+                View sidebar = activity.findViewById(R.id.navigation_sidebar);
+                View content = activity.findViewById(R.id.main_content);
+                WindowInsetsCompat insets = new WindowInsetsCompat.Builder()
+                        .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.of(11, 23, 29, 31))
+                        .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.of(17, 41, 37, 43))
+                        .build();
+                for (int direction : new int[]{View.LAYOUT_DIRECTION_RTL, View.LAYOUT_DIRECTION_LTR}) {
+                    drawer.setLayoutDirection(direction);
+                    ViewCompat.dispatchApplyWindowInsets(drawer, insets);
+                    boolean rtl = direction == View.LAYOUT_DIRECTION_RTL;
+                    DrawerLayout.LayoutParams placement = (DrawerLayout.LayoutParams) sidebar.getLayoutParams();
+                    assertEquals(rtl ? Gravity.RIGHT : Gravity.LEFT,
+                            GravityCompat.getAbsoluteGravity(placement.gravity, direction)
+                                    & Gravity.HORIZONTAL_GRAVITY_MASK);
+                    assertEquals(rtl ? 0 : 17, sidebar.getPaddingLeft());
+                    assertEquals(rtl ? 37 : 0, sidebar.getPaddingRight());
+                    assertEquals(41, sidebar.getPaddingTop());
+                    assertEquals(43, sidebar.getPaddingBottom());
+                    assertEquals(17, content.getPaddingLeft());
+                    assertEquals(37, content.getPaddingRight());
+                    assertEquals(41, content.getPaddingTop());
+                    assertEquals(43, content.getPaddingBottom());
+                }
+            });
+        }
+    }
+
     @Test public void navigationStaysAtTheTopWhileHistoryScrollsThroughAllPages() throws Exception {
         ReadOnlyAccount account = new ReadOnlyAccount();
         try (ActivityScenario<MainActivity> scenario = launchAccount(account)) {

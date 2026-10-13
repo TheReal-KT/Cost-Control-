@@ -47,6 +47,7 @@ import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.Espresso.pressBack;
 import static androidx.test.espresso.matcher.RootMatchers.isDialog;
 import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.action.ViewActions.scrollTo;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
 import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.matcher.ViewMatchers.Visibility.GONE;
@@ -755,6 +756,49 @@ public final class ChatAndAuthTest {
     }
 
     @Test
+    public void appendingAfterAFailedRefreshStillReloadsNewlySavedChatsOnReopen() throws Exception {
+        FakeChatHistoryRepository history = new FakeChatHistoryRepository(
+                "Unused chat", "Unused question", "Unused answer", true);
+        history.paginatedHistory = true;
+        AtomicReference<AiChatView> chatReference = new AtomicReference<>();
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            onView(withId(R.id.auth_email)).check(matches(isDisplayed()));
+            try {
+                scenario.onActivity(activity -> {
+                    AiChatView chat = new AiChatView(activity);
+                    chat.setHistoryRepository(history);
+                    chat.restoreState(singleTurnState(UUID.randomUUID().toString(),
+                            UUID.randomUUID().toString(), "Newly saved chat", "Question", "Answer", false));
+                    showChatWithHistory(activity, chat);
+                    chatReference.set(chat);
+                    chat.openHistory();
+                });
+                waitForDisplayed("Saved chat 1");
+                history.failuresRemaining.set(1);
+                scenario.onActivity(activity -> chatReference.get().findViewById(R.id.chat_retry_save)
+                        .performClick());
+                waitForDisplayed(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                        .getString(R.string.chat_history_load_failed));
+                onView(withText(R.string.chat_history_load_more)).perform(scrollTo(), click());
+                waitForDisplayed("Saved chat 26");
+                scenario.onActivity(activity -> {
+                    AiChatView chat = chatReference.get();
+                    chat.closeHistory();
+                    chat.openHistory();
+                    ((android.widget.ScrollView) chat.getHistoryView()
+                            .findViewById(R.id.chat_history_scroll)).fullScroll(View.FOCUS_UP);
+                });
+                waitForDisplayed("Newly saved chat");
+                assertEquals(java.util.Arrays.asList(0, 0, 25, 0), history.listOffsets);
+            } finally {
+                scenario.onActivity(activity -> {
+                    if (chatReference.get() != null) chatReference.get().dispose();
+                });
+            }
+        }
+    }
+
+    @Test
     public void historyLoadFailureCanRetryIntoAnEmptyState() throws Exception {
         FakeChatHistoryRepository history = new FakeChatHistoryRepository(
                 "Unused chat", "An unused question", "An unused answer", true);
@@ -865,6 +909,8 @@ public final class ChatAndAuthTest {
         private volatile boolean lastSavedComplete;
         private volatile boolean failDelete;
         private volatile boolean emptyHistory;
+        private boolean paginatedHistory;
+        private final List<Integer> listOffsets = Collections.synchronizedList(new ArrayList<>());
         private final AtomicInteger failuresRemaining = new AtomicInteger();
         private final AtomicInteger listCount = new AtomicInteger();
         private final AtomicInteger deleteCount = new AtomicInteger();
@@ -886,6 +932,7 @@ public final class ChatAndAuthTest {
 
         @Override public List<ChatConversation> listConversations(ChatHistoryScope scope, int offset, int limit)
                 throws ApiException {
+            listOffsets.add(offset);
             int call = listCount.incrementAndGet();
             if (call == 1 && conversationsLoaded != null) {
                 conversationsLoaded.countDown();
@@ -895,6 +942,18 @@ public final class ChatAndAuthTest {
                 throw new ApiException(ApiException.Category.NETWORK, "Temporary failure", null, 0);
             }
             if (emptyHistory && emptyHistoryLoaded != null) emptyHistoryLoaded.countDown();
+            if (paginatedHistory) {
+                List<ChatConversation> page = new ArrayList<>();
+                OffsetDateTime now = OffsetDateTime.now();
+                if (offset == 0 && saveCount.get() > 0) {
+                    page.add(new ChatConversation(lastSavedConversationId, "Newly saved chat", now, now));
+                }
+                for (int index = offset; index < 26 && page.size() < limit; index++) {
+                    page.add(new ChatConversation(new UUID(0, index + 1).toString(),
+                            "Saved chat " + (index + 1), now, now));
+                }
+                return page;
+            }
             return deleted || emptyHistory ? Collections.emptyList() : Collections.singletonList(conversation);
         }
 

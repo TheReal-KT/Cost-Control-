@@ -27,3 +27,14 @@ adb -s emulator-5554 shell am instrument -w -r -e additionalTestOutputDir /sdcar
 Screenshots were rendered from the in-memory test account. The [committed sidebar preview](design/previews/sidebar-navigation.png) shows the final AI label and supplied trash icon. Native-run logs and additional chat/compact-window previews remain in the ignored local verification directory.
 
 Physical display rotation was not verified: this emulator stalled or disconnected during rotation. The short-screen test instead resizes the app window to 390 dp high and verifies that the navigation menu and chat history remain separately scrollable. Live provider inference and large-text/TalkBack acceptance are outside these checks.
+
+## PR 9 review repairs
+
+Verified the repository origin and checked-out `fix/layout-redesign` branch against PR 9's head `c4ee595` and base `chat-history-ui` before editing.
+
+- A successful append no longer clears history's dirty flag. If saving a chat is followed by a failed first-page refresh, reopening the sidebar still refreshes page zero, even after older chats were successfully appended.
+- Sidebar system-bar/cutout padding now follows its physical start edge: left in LTR, right in RTL. Main-content padding and vertical sidebar insets are preserved.
+
+Both new emulator regressions failed on the original PR code: the saved conversation stayed absent on reopen, and RTL incorrectly retained left-side padding. After the fixes, the chat/auth and sidebar classes completed `OK (23 tests)`: 22 passed and the missing-backend test was skipped because an endpoint is configured. The drawer test supplies unequal physical bar/cutout insets and checks both RTL and LTR; it does not depend on rotating the emulator.
+
+Debug app/test APK builds, all 16 unit tests and lint passed again (0 errors, 74 warnings). The normal debug app was also rebuilt, installed with existing data preserved, and cold-launched successfully. Review logs remain in ignored `.local-demo/pr9-review-baseline.txt` and `.local-demo/pr9-review-fixed.txt`.

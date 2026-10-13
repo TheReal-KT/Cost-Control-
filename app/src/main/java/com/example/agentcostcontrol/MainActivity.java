@@ -282,7 +282,9 @@ public class MainActivity extends AppCompatActivity {
                     | WindowInsetsCompat.Type.displayCutout());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
             content.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
-            navigationSidebar.setPadding(bars.left, bars.top, 0, bars.bottom);
+            boolean sidebarOnRight = navigationSidebar.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            navigationSidebar.setPadding(sidebarOnRight ? 0 : bars.left, bars.top,
+                    sidebarOnRight ? bars.right : 0, bars.bottom);
             updateSidebarSize();
             return windowInsets;
         });

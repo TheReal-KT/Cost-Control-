@@ -1013,7 +1013,7 @@ public final class AiChatView extends LinearLayout {
                         historyLoading = false;
                         historyLoadFailed = false;
                         historyDeleteFailed = false;
-                        historyDirty = false;
+                        if (!append) historyDirty = false;
                         renderHistoryPanel();
                     });
                 } catch (ApiException error) {
