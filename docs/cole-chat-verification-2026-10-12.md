@@ -44,3 +44,9 @@ Repeated JVM/lint checks encountered Windows refusal to delete existing generate
 ## Limits
 
 Automated backend tests use mocked upstreams. The native account/repository tests use fictional fixtures. These results do not establish live provider availability or the accuracy of generated financial prose. The real app's saved account data was preserved. The supplied home artwork retains its original long path, which lint flags as a performance warning.
+
+## PR review follow-up — 13 October 2026
+
+Addressed the certificate renewal comment on `Start-LocalAi.ps1`. Startup now initializes TLS, then runs the existing Android installer with `-InstallOnly`, and starts Uvicorn only after successful installation. The incremental install runs on every startup, covering renewal performed by an earlier initialization and retries after a failed installation. The default Android run command still launches the app; install-only preserves its working directory/JAVA_HOME cleanup without launching.
+
+`pwsh -NoProfile -File scripts/tests/LocalAiStartupTest.ps1` passed nine regression cases: unchanged certificate, renewed certificate, missing certificate, installation failure after renewal, retry, initialization failure, install-only, default launch and build failure. PowerShell syntax checks passed for both changed scripts; `git diff --check` passed. Tests use isolated initialization/Gradle/ADB/server stubs and verify initialization → installation → server ordering, matching certificate state, failure propagation and runner environment restoration. No real certificate was rotated or live backend restarted for these checks; the earlier Android/backend test results above were not rerun for this script-only follow-up.

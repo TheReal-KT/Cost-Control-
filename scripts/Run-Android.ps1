@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.0
 [CmdletBinding()]
-param()
+param([switch]$InstallOnly)
 $ErrorActionPreference = 'Stop'
 
 $adbCommand = Get-Command adb -ErrorAction SilentlyContinue
@@ -36,12 +36,14 @@ try {
     & ./gradlew.bat :app:installDebug --console=plain
     if ($LASTEXITCODE -ne 0) { throw 'Android build/install failed. See the Gradle error above.' }
 
-    $launchOutput = & $adbPath -s $serial shell am start -W `
-        -n com.example.agentcostcontrol/.MainActivity 2>&1
-    if ($LASTEXITCODE -ne 0 -or ($launchOutput -match '^Error:')) {
-        throw "Could not launch Cost Control: $($launchOutput -join [Environment]::NewLine)"
+    if (-not $InstallOnly) {
+        $launchOutput = & $adbPath -s $serial shell am start -W `
+            -n com.example.agentcostcontrol/.MainActivity 2>&1
+        if ($LASTEXITCODE -ne 0 -or ($launchOutput -match '^Error:')) {
+            throw "Could not launch Cost Control: $($launchOutput -join [Environment]::NewLine)"
+        }
+        $launchOutput | Write-Output
     }
-    $launchOutput | Write-Output
 } finally {
     Pop-Location
     $env:JAVA_HOME = $previousJavaHome

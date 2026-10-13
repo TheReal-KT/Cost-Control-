@@ -65,7 +65,15 @@ Initialization generates a 30-day localhost TLS certificate and private key in i
 pwsh -File scripts/Start-LocalAi.ps1
 ```
 
-Keep the server terminal open while using Chat. After restarting the emulator or ADB, rerun `scripts/Initialize-LocalDemo.ps1` to restore forwarding if the server is still running, or `scripts/Start-LocalAi.ps1` if it has stopped.
+Startup runs an incremental debug build/install before starting the server, so the installed app trusts the current certificate even after renewal. If initialization, building or installation fails, the server does not start; fix the reported error and rerun the command. The startup install preserves saved application data and does not launch the app. Open Cost Control afterwards or use Android Studio Run.
+
+Keep the server terminal open while using Chat. After restarting the emulator or ADB, rerun `scripts/Initialize-LocalDemo.ps1` to restore forwarding if the server is still running, or `scripts/Start-LocalAi.ps1` if it has stopped. If initialization renews the certificate while a server is already running, stop that server with `Ctrl+C` and rerun `Start-LocalAi.ps1` to install the matching certificate and restart HTTPS.
+
+The startup-order regression checks use isolated command stubs, without changing real certificates, launching a server or installing an app:
+
+```powershell
+pwsh -NoProfile -File scripts/tests/LocalAiStartupTest.ps1
+```
 
 Open **Cost Control**, sign in, then **AI → Chat**. Ask “Explain my monthly spend” to stream an answer using your saved subscriptions and current budget. An empty account shows zero spending; Chat never substitutes sample records. Your question and account facts are sent to OpenRouter. Stop keeps partial text labelled incomplete and retains the question for retry. For an opt-in emulator-to-backend TLS/Auth check, with the server running:
 
