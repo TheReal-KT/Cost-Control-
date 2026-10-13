@@ -34,12 +34,12 @@ For local Android testing, use the TLS certificate and ADB forwarding setup in t
 {
   "prompt": "Explain my monthly spend",
   "model": "nvidia/nemotron-3-super-120b-a12b:free",
-  "data_mode": "synthetic",
+  "data_mode": "account",
   "stream": true
 }
 ```
 
-Send the user's Supabase access token as `Authorization: Bearer ...`. Omit `stream`, or set it to false, for JSON containing `answer` and `conversation_id`. Questions are limited to 4,000 characters; extra fields, unsupported models and non-synthetic data modes are rejected. Request bodies are bounded to 32 KiB before JSON parsing. Validation failures do not echo questions.
+Send the user's Supabase access token as `Authorization: Bearer ...`. Omit `stream`, or set it to false, for JSON containing `answer` and `conversation_id`. Questions are limited to 4,000 characters; extra fields, unsupported models and data modes other than `account` are rejected. Request bodies are bounded to 32 KiB before JSON parsing. Validation failures do not echo questions. Rebuild Android when upgrading from the earlier `synthetic` contract; old clients fail validation instead of silently receiving sample data.
 
 With `stream: true`, the response is `text/event-stream`, with `Cache-Control: no-store` and `X-Accel-Buffering: no`. Authorization, conversation ownership and initial quota errors are ordinary HTTP errors before streaming starts. The application's SSE events are:
 
@@ -48,7 +48,7 @@ event: start
 data: {"conversation_id":"caller_bound_id"}
 
 event: delta
-data: {"text":"Fictional example ..."}
+data: {"text":"Account data ..."}
 
 event: done
 data: {"conversation_id":"caller_bound_id"}
@@ -61,13 +61,13 @@ The server verifies the caller through Supabase `GET /auth/v1/user`; it does not
 
 ## Workflow and data policy
 
-`verify Supabase identity → select task locally → load_example → calculate → explain → validate reply`
+`verify Supabase identity → read owned Supabase records → calculate → answer the actual question → validate reply`
 
-The three graph nodes live in `src/agentic_subscription_manager/workflow.py`. Calculations in `evidence.py` are ordinary Python functions: active subscriptions only, annual prices summed before division, final HALF_UP rounding per currency, no currency conversion. The response renders authoritative figures separately from the model's explanation.
+The two graph nodes live in `src/agentic_subscription_manager/workflow.py`. The account adapter resolves the verified Auth UUID to the canonical bigint profile and uses the caller's JWT plus the publishable key for GET-only reads of subscriptions, the current budget and time-zone preference. Explicit owner filters and Supabase RLS both apply. Tokens and identities never enter graph state. Calculations in `evidence.py` use active subscriptions only, sum annual prices before division, round HALF_UP per currency and never convert currencies. Topic matching selects only a deterministic facts header; Nemotron always receives the actual question, including general questions.
 
-**The free-model prototype is fictional-data only.** The server uses built-in synthetic records, never reads application tables, and does not forward the raw question, tokens, Auth identity or account records to OpenRouter. A local keyword selector chooses a predefined spending, renewal, budget or reported-usage task. Unsupported questions return a short limitation without invoking the model. This initial mode cannot answer questions about the user's actual account or carry conversational context. It is intentionally more limited than arbitrary model chat.
+**Chat now uses real account records, as explicitly requested for the local demonstration.** The question and relevant account facts are sent to OpenRouter. No tokens, Auth/profile IDs, email addresses or passwords are added to provider messages. The Android composer discloses this data flow. Records are untrusted data in user-role messages, not system instructions. An empty account produces zero spending and no saved budget; there is no sample fallback. Account-read failures stop the request before inference instead of masquerading as empty data. Gmail is not connected and saved chat history is display-only, so follow-up questions must include their context.
 
-The switch to [Nemotron 3 Super free](https://openrouter.ai/nvidia/nemotron-3-super-120b-a12b:free) does not establish a private-data guarantee. OpenRouter distinguishes provider policies and free-model data settings. A suitable real-data endpoint and reviewed data policy are required before adding owner-scoped application reads. At that point, resolve Auth UUID to the existing bigint profile ID and enforce the canonical ownership contract; do not reuse caller-supplied IDs or the prototype SQLAlchemy queries. [Provider data guidance](https://openrouter.ai/docs/guides/privacy/logging).
+Using [Nemotron 3 Super free](https://openrouter.ai/nvidia/nemotron-3-super-120b-a12b:free) does not establish a private-data guarantee. The local demo sends the requested account facts under the configured OpenRouter/provider policies. Review those policies and account data controls before distributing the application; this change does not claim zero retention or training exclusion. [Provider data guidance](https://openrouter.ai/docs/guides/privacy/logging). See [ADR 0005](../docs/adr/0005-real-account-ai-chat.md) for the explicit change from the earlier fictional-only decision.
 
 The provider request uses the fixed `:free` model, 400 maximum output tokens, disabled reasoning, `tool_choice: none` and disabled provider fallback. Reasoning shares the output budget and otherwise can consume all 400 tokens without a visible answer. There is no tools list or action executor. It does not retry failed calls or substitute a paid model. Empty, wrong-type, overlong, malformed, tool-call and incomplete responses fail; model prose remains generated content, not a guarantee of factual correctness.
 
@@ -76,6 +76,7 @@ The provider request uses the fixed `:free` model, 400 maximum output tokens, di
 - At most four in-flight chat operations, five provider calls per user/minute, twenty globally/minute and fifty globally/UTC day.
 - Counters are bounded and **process-local**, reset on restart and require one worker/one instance. They are development admission limits, not a durable quota or shared account guarantee. Before scaling, use shared admission state. The provider's own limits still apply, including calls from other applications using the same provider account.
 - Eight-second Auth timeout, twenty-five-second provider I/O timeout, thirty-eight-second overall operation deadline; upstream JSON/SSE is limited to 64 KiB and generated prose to 4,000 characters. Android bounds response bytes to 128 KiB and rendered text to 16,000 characters, with a 45-second read timeout.
+- Account reads have an eight-second timeout and a 256 KiB response limit per page. Subscription pages contain at most 100 rows, with an overall limit of 1,000; exceeding that limit fails explicitly. Totals include every loaded row. Provider service, renewal and low-usage lists contain at most 50 items with counts/truncation flags; the deterministic answer header shows at most 20 names. Budget periods use the saved IANA time zone, defaulting to Africa/Johannesburg. The small `tzdata` dependency supplies IANA rules on Windows.
 - 401: sign in again; 404: unavailable conversation; 413/422: invalid input; 429: busy/limited; 502/503/504: upstream/configuration/timeout failure. Upstream details and credentials are never returned. Retry-After is bounded and respected; the daily local cap waits for the next UTC day.
 - Client disconnect cancels local graph and outbound HTTP work. A remote provider may already have accepted the request; cancellation there remains best effort. Reserved attempts are not refunded.
 - Logs contain request ID, status and elapsed milliseconds, never prompts, tokens, profiles or provider bodies.
@@ -84,4 +85,4 @@ The provider request uses the fixed `:free` model, 400 maximum output tokens, di
 
 The original top-level `*_Router.py`, `Models.py`, `ASM_database.py` and `create_tables.py` remain for historical review. They are outside the active API and their former bcrypt/SQLAlchemy/psycopg dependencies are no longer installed by the AI package. Do not run those routers or `create_tables.py` against the canonical database: they implement a different, incomplete credential/schema contract. Canonical SQL migrations under `supabase/` remain authoritative.
 
-Read [ADR 0002](../docs/adr/0002-python-langgraph-ai-boundary.md), [ADR 0003](../docs/adr/0003-streaming-local-android-ai.md) and the [streaming verification record](../docs/ai-streaming-verification-2026-10-12.md). Durable memory, real-account analysis, Gmail/Composio connection, source links, recommendation persistence, scheduling and notification delivery remain separate work.
+Read [ADR 0002](../docs/adr/0002-python-langgraph-ai-boundary.md), [ADR 0003](../docs/adr/0003-streaming-local-android-ai.md), [ADR 0005](../docs/adr/0005-real-account-ai-chat.md) and the [streaming verification record](../docs/ai-streaming-verification-2026-10-12.md). Durable model memory, Gmail/Composio connection, source links, recommendation persistence, scheduling and notification delivery remain separate work.

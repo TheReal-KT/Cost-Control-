@@ -5,32 +5,125 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/surface"
-    android:paddingStart="20dp"
-    android:paddingEnd="20dp">
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp">
+
+    <LinearLayout
+        android:id="@+id/chat_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/chat_title"
+            android:textColor="@color/text_primary"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/chat_history"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/chat_history_open"
+            android:padding="12dp"
+            android:src="@drawable/ic_chat_history"
+            app:tint="@color/text_primary" />
+
+        <ImageButton
+            android:id="@+id/chat_new"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/chat_new"
+            android:padding="12dp"
+            android:src="@drawable/ic_chat_new"
+            app:tint="@color/text_primary" />
+    </LinearLayout>
 
     <ScrollView
         android:id="@+id/chat_scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:clipToPadding="false"
         android:fillViewport="true">
         <LinearLayout
             android:id="@+id/chat_messages"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingTop="16dp"
+            android:paddingTop="12dp"
             android:paddingBottom="16dp">
-            <TextView
-                android:id="@+id/chat_empty"
+            <LinearLayout
+                android:id="@+id/chat_empty_state"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingTop="60dp"
-                android:text="@string/chat_empty"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold"
-                android:letterSpacing="-0.02"
-                android:textSize="30sp" />
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/chat_empty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="38dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/chat_empty"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"
+                    android:letterSpacing="-0.02"
+                    android:textSize="28sp" />
+                <TextView
+                    android:id="@+id/chat_empty_subtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingBottom="20dp"
+                    android:text="@string/chat_empty_subtitle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/chat_suggestion_renew"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="@string/chat_suggestion_renew"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    app:cornerRadius="16dp"
+                    app:strokeColor="@color/card_outline" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/chat_suggestion_spend"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="@string/chat_suggestion_spend"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    app:cornerRadius="16dp"
+                    app:strokeColor="@color/card_outline" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/chat_suggestion_review"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/chat_suggestion_review"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    app:cornerRadius="16dp"
+                    app:strokeColor="@color/card_outline" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/chat_turns"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
         </LinearLayout>
     </ScrollView>
 
@@ -39,10 +132,28 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:accessibilityLiveRegion="polite"
-        android:paddingBottom="8dp"
+        android:paddingBottom="4dp"
         android:textColor="@color/text_secondary"
         android:textSize="14sp"
         android:visibility="gone" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/chat_retry_save"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginBottom="8dp"
+        android:text="@string/chat_retry_save"
+        android:textAllCaps="false"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/chat_data_notice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="6dp"
+        android:text="@string/chat_data_notice"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
 
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
@@ -64,6 +175,7 @@
                 android:layout_height="wrap_content"
                 android:minHeight="56dp"
                 android:maxLines="4"
+                android:maxLength="4000"
                 android:background="@null"
                 android:gravity="top|start"
                 android:hint="@string/chat_prompt_hint"
@@ -92,8 +204,7 @@
                     android:orientation="horizontal"
                     android:paddingStart="8dp"
                     android:paddingEnd="12dp"
-                    android:gravity="start|center_vertical"
-                    >
+                    android:gravity="start|center_vertical">
                     <ImageView
                         android:layout_width="24dp"
                         android:layout_height="24dp"

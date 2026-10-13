@@ -2,6 +2,8 @@
 
 Date: 7 October 2026. Status: accepted by the project owner.
 
+The fictional-only data flow and question redaction below are superseded by [ADR 0005](0005-real-account-ai-chat.md). The Supabase identity and focused Python API boundaries remain.
+
 ## Context
 
 Android already uses Supabase Auth and protected REST tables under ADR 0001. The merged backend prototype adds custom login and general CRUD through FastAPI/SQLAlchemy, duplicating these responsibilities without matching current identity/schema contracts. The AI tab needs a trusted model endpoint, and the owner selected Python for LangGraph.

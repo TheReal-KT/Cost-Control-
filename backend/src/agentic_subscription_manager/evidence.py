@@ -1,4 +1,4 @@
-"""Pure decimal calculations over server-owned fictional records only."""
+"""Pure decimal calculations over validated, owner-scoped account records."""
 
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -14,7 +14,7 @@ class AnalysisTask(StrEnum):
 
 
 def select_task(question: str) -> AnalysisTask | None:
-    # Raw text never crosses the provider boundary, including text around matched keywords.
+    # This selects a deterministic facts header; the model still receives the actual question.
     normalized = question.casefold()
     if "renew" in normalized or "reminder" in normalized:
         return AnalysisTask.RENEWALS
@@ -36,33 +36,22 @@ class SubscriptionEvidence:
     renewal: date
     active: bool = True
     low_usage_reported: bool = False
+    status: str | None = None
+    usage_level: str | None = None
 
 
-def synthetic_records(today: date) -> tuple[SubscriptionEvidence, ...]:
-    return (
-        SubscriptionEvidence(
-            "Example streaming",
-            Decimal("100.00"),
-            "ZAR",
-            False,
-            today + timedelta(days=3),
-            low_usage_reported=True,
-        ),
-        SubscriptionEvidence(
-            "Example cloud", Decimal("1200.00"), "ZAR", True, today + timedelta(days=10)
-        ),
-        SubscriptionEvidence(
-            "Example editor", Decimal("12.00"), "USD", False, today + timedelta(days=20)
-        ),
-        SubscriptionEvidence(
-            "Example paused",
-            Decimal("900.00"),
-            "ZAR",
-            False,
-            today + timedelta(days=2),
-            active=False,
-        ),
-    )
+@dataclass(frozen=True)
+class BudgetEvidence:
+    limit: Decimal
+    currency: str
+
+
+@dataclass(frozen=True)
+class AccountEvidence:
+    records: tuple[SubscriptionEvidence, ...]
+    budget: BudgetEvidence | None
+    today: date
+    time_zone: str
 
 
 def monthly_totals(records: tuple[SubscriptionEvidence, ...]) -> dict[str, str]:
@@ -85,46 +74,88 @@ def monthly_totals(records: tuple[SubscriptionEvidence, ...]) -> dict[str, str]:
         }
 
 
-def calculate_evidence(records: tuple[SubscriptionEvidence, ...], today: date) -> dict:
+def calculate_evidence(account: AccountEvidence) -> dict:
+    records, today = account.records, account.today
     totals = monthly_totals(records)
+    budget = account.budget
+    renewals = [
+        {"name": record.name, "date": record.renewal.isoformat()}
+        for record in records
+        if record.active and today <= record.renewal <= today + timedelta(7)
+    ]
+    low_usage = [record.name for record in records if record.active and record.low_usage_reported]
     return {
-        "data_mode": "fictional example",
+        "data_mode": "account",
         "as_of": today.isoformat(),
+        "time_zone": account.time_zone,
         "period": today.strftime("%Y-%m"),
         "monthly_equivalent": totals,
         "active_count": sum(record.active for record in records),
         "budget": {
-            "currency": "ZAR",
-            "limit": "180.00",
+            "currency": budget.currency,
+            "limit": str(budget.limit),
             "period": today.strftime("%Y-%m"),
-            "over_by": str(max(Decimal(0), Decimal(totals.get("ZAR", "0")) - Decimal(180))),
-        },
-        "renewals_within_7_days": [
-            {"name": record.name, "date": record.renewal.isoformat()}
-            for record in records
-            if record.active and today <= record.renewal <= today + timedelta(7)
+            "over_by": str(
+                max(Decimal(0), Decimal(totals.get(budget.currency, "0")) - budget.limit)
+            ),
+        }
+        if budget
+        else None,
+        "subscription_count": len(records),
+        "services": [
+            {
+                "name": record.name,
+                "price": str(record.price),
+                "currency": record.currency,
+                "billing_cycle": "annual" if record.annual else "monthly",
+                "active": record.active,
+                "status": record.status or ("active" if record.active else "inactive"),
+                "renewal_date": record.renewal.isoformat(),
+                "reported_low_usage": record.low_usage_reported,
+                "reported_usage_level": record.usage_level,
+            }
+            for record in records[:50]
         ],
-        "reported_low_usage": [
-            record.name for record in records if record.active and record.low_usage_reported
-        ],
+        "service_list_truncated": len(records) > 50,
+        "renewals_within_7_days": renewals[:50],
+        "renewal_count": len(renewals),
+        "renewal_list_truncated": len(renewals) > 50,
+        "reported_low_usage": low_usage[:50],
+        "reported_low_usage_count": len(low_usage),
+        "reported_low_usage_list_truncated": len(low_usage) > 50,
     }
 
 
 def render_facts(task: AnalysisTask, evidence: dict) -> str:
     if task == AnalysisTask.SPEND:
-        totals = "; ".join(
-            f"{currency} {value}" for currency, value in evidence["monthly_equivalent"].items()
-        )
-        return f"Monthly equivalent: {totals}. Currencies are separate."
+        currencies = list(evidence["monthly_equivalent"].items())
+        totals = "; ".join(f"{currency} {value}" for currency, value in currencies[:20])
+        amount = totals or "0.00 (no active subscriptions)"
+        suffix = f" Showing 20 of {len(currencies)} currencies." if len(currencies) > 20 else ""
+        return f"Monthly equivalent: {amount}. Currencies are separate.{suffix}"
     if task == AnalysisTask.BUDGET:
         budget = evidence["budget"]
+        if budget is None:
+            return f"No budget saved for {evidence['period']}."
         return (
             f"{budget['period']} budget: {budget['currency']} {budget['limit']}; "
             f"over by {budget['currency']} {budget['over_by']}."
         )
     if task == AnalysisTask.RENEWALS:
         renewals = "; ".join(
-            f"{item['name']} on {item['date']}" for item in evidence["renewals_within_7_days"]
+            f"{item['name']} on {item['date']}" for item in evidence["renewals_within_7_days"][:20]
         )
-        return f"Next 7 days: {renewals or 'no renewals'}."
-    return "Reported low usage: " + "; ".join(evidence["reported_low_usage"]) + "."
+        suffix = ""
+        if evidence["renewal_count"] > 20:
+            suffix = f" Showing 20 of {evidence['renewal_count']} renewals."
+        return f"Next 7 days: {renewals or 'no renewals'}.{suffix}"
+    return (
+        "Reported low usage: "
+        + ("; ".join(evidence["reported_low_usage"][:20]) or "none recorded")
+        + "."
+        + (
+            f" Showing 20 of {evidence['reported_low_usage_count']} services."
+            if evidence["reported_low_usage_count"] > 20
+            else ""
+        )
+    )

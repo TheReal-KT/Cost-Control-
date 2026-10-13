@@ -4,10 +4,11 @@ import asyncio
 import json
 import time
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi.testclient import TestClient
@@ -20,7 +21,14 @@ from agentic_subscription_manager.api import (
     run_until_disconnect,
 )
 from agentic_subscription_manager.contracts import MODEL_ID
-from agentic_subscription_manager.evidence import SubscriptionEvidence, monthly_totals
+from agentic_subscription_manager.evidence import (
+    AccountEvidence,
+    AnalysisTask,
+    SubscriptionEvidence,
+    calculate_evidence,
+    monthly_totals,
+    render_facts,
+)
 from agentic_subscription_manager.security import ConversationIds, Settings
 
 OWNER_A = UUID("00000000-0000-4000-8000-000000000001")
@@ -51,16 +59,53 @@ class FakeUpstreams:
         }
         self.provider_error = None
         self.provider_headers = {}
+        self.account_rows = {}
+        self.account_status = {}
 
     def handle(self, request: httpx.Request):
         self.requests.append(request)
         if request.url.host == "project.example.invalid":
-            assert request.url.path == "/auth/v1/user"
             assert request.headers["apikey"] == CONFIG.publishable_key
             token = request.headers["authorization"]
+            owner = OWNER_B if token == "Bearer user-b" else OWNER_A
+            user_id = "202" if owner == OWNER_B else "101"
+            if request.url.path.startswith("/rest/v1/"):
+                assert request.method == "GET"
+                table = request.url.path.rsplit("/", 1)[1]
+                today = datetime.now(UTC).astimezone(ZoneInfo("Africa/Johannesburg")).date()
+                subscriptions = [
+                    {
+                        "user_id": user_id,
+                        "subscription_name": name,
+                        "subscription_price": price,
+                        "currency": currency,
+                        "billing_cycle": cycle,
+                        "status": status,
+                        "usage_level": usage,
+                        "renewal_date": (today + timedelta(days=days)).isoformat(),
+                    }
+                    for name, price, currency, cycle, status, usage, days in (
+                        ("Netflix", "100.00", "ZAR", "monthly", "active", "low", 3),
+                        ("Cloud", "1200.00", "ZAR", "annual", "active", None, 10),
+                        ("ChatGPT", "12.00", "USD", "monthly", "active", "high", 20),
+                        ("Paused", "900.00", "ZAR", "monthly", "paused", "unknown", 2),
+                    )
+                ]
+                defaults = {
+                    "users": [{"user_id": user_id, "auth_user_id": str(owner)}],
+                    "user_settings": [],
+                    "subscriptions": subscriptions,
+                    "budgets": [{"user_id": user_id, "budget_limit": "180.00", "currency": "ZAR"}],
+                }
+                rows = self.account_rows.get(table, defaults[table])
+                offset = int(request.url.params.get("offset", "0"))
+                limit = int(request.url.params["limit"])
+                return httpx.Response(
+                    self.account_status.get(table, 200), json=rows[offset : offset + limit]
+                )
+            assert request.url.path == "/auth/v1/user"
             if token == "Bearer expired":
                 return httpx.Response(401, json={"message": "expired synthetic session"})
-            owner = OWNER_B if token == "Bearer user-b" else OWNER_A
             data = self.auth_data if self.auth_data is not None else {"id": str(owner)}
             return httpx.Response(self.auth_status, json=data)
         assert request.url == "https://openrouter.ai/api/v1/chat/completions"
@@ -88,7 +133,7 @@ class ApiContracts(unittest.TestCase):
         self.client.__exit__(None, None, None)
 
     def ask(self, prompt="Explain my monthly spend", token="user-a", **fields):
-        payload = {"prompt": prompt, "model": MODEL_ID, "data_mode": "synthetic", **fields}
+        payload = {"prompt": prompt, "model": MODEL_ID, "data_mode": "account", **fields}
         return self.client.post(
             "/ai/chat", json=payload, headers={"Authorization": f"Bearer {token}"}
         )
@@ -98,19 +143,20 @@ class ApiContracts(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         reply = response.json()
         self.assertEqual({"answer", "conversation_id"}, set(reply))
-        self.assertIn("Fictional example", reply["answer"])
+        self.assertIn("Account data", reply["answer"])
         self.assertIn("ZAR 200.00", reply["answer"])
         self.assertIn("USD 12.00", reply["answer"])
         self.assertLessEqual(len(reply["answer"].encode("utf-16-le")) // 2, 16000)
         self.assertRegex(reply["conversation_id"], r"^[A-Za-z0-9_-]{1,128}$")
         self.assertEqual(1, len(self.upstreams.provider_requests))
 
-    def test_raw_prompt_and_identity_never_reach_provider(self):
-        question = "Explain my spending. PRIVATE_PERSON_123 account PRIVATE_BANK_456"
+    def test_actual_question_and_owned_evidence_reach_provider_without_credentials_or_identity(
+        self,
+    ):
+        question = "Explain my spending in one sentence and mention annual plans"
         self.assertEqual(200, self.ask(question).status_code)
         request = self.upstreams.provider_requests[0]
         wire = request.content.decode()
-        self.assertNotIn("PRIVATE_", wire)
         self.assertNotIn("user-a", wire)
         self.assertNotIn(str(OWNER_A), wire)
         self.assertNotIn(CONFIG.publishable_key, wire)
@@ -121,19 +167,29 @@ class ApiContracts(unittest.TestCase):
         self.assertFalse(body["provider"]["allow_fallbacks"])
         self.assertNotIn("models", body)
         self.assertNotIn("response_format", body)
+        self.assertEqual(question, body["messages"][-1]["content"])
+        self.assertIn("Netflix", body["messages"][1]["content"])
+        self.assertNotIn("user_id", body["messages"][1]["content"])
+        self.assertEqual("none", body["tool_choice"])
+        self.assertNotIn("tools", body)
+        evidence = self.account_evidence()
+        paused = next(service for service in evidence["services"] if service["name"] == "Paused")
+        self.assertEqual("paused", paused["status"])
+        self.assertFalse(paused["active"])
+        self.assertEqual("unknown", paused["reported_usage_level"])
+
+    def test_general_question_calls_model_instead_of_returning_a_canned_limitation(self):
+        question = "Which model are you?"
+        response = self.ask(question)
+        self.assertEqual(200, response.status_code)
+        self.assertNotIn("Fictional examples only", response.json()["answer"])
         self.assertEqual(
-            "explain monthly equivalent spending",
-            json.loads(body["messages"][1]["content"])["task"],
+            question,
+            json.loads(self.upstreams.provider_requests[0].content)["messages"][-1]["content"],
         )
 
-    def test_unknown_question_is_not_forwarded_or_simulated(self):
-        response = self.ask("My secret is PRIVATE_123. Tell me about weather")
-        self.assertEqual(200, response.status_code)
-        self.assertIn("Fictional examples only", response.json()["answer"])
-        self.assertEqual([], self.upstreams.provider_requests)
-
     def test_missing_invalid_and_expired_auth_never_call_provider(self):
-        payload = {"prompt": "spend", "model": MODEL_ID, "data_mode": "synthetic"}
+        payload = {"prompt": "spend", "model": MODEL_ID, "data_mode": "account"}
         for headers in (
             {},
             {"Authorization": "Basic secret"},
@@ -175,9 +231,9 @@ class ApiContracts(unittest.TestCase):
         self.assertEqual(404, self.ask(conversation_id=expired).status_code)
         self.assertEqual([], self.upstreams.provider_requests)
 
-    def test_client_cannot_select_real_data_paid_model_or_owner(self):
+    def test_client_cannot_select_sample_data_paid_model_or_owner(self):
         for fields in (
-            {"data_mode": "real"},
+            {"data_mode": "synthetic"},
             {"model": MODEL_ID.removesuffix(":free")},
             {"user_id": 202},
             {"conversation_id": "bad/id"},
@@ -213,7 +269,7 @@ class ApiContracts(unittest.TestCase):
             self.assertFalse(client.get("/health").json()["chat_configured"])
             response = client.post(
                 "/ai/chat",
-                json={"prompt": "spend", "model": MODEL_ID, "data_mode": "synthetic"},
+                json={"prompt": "spend", "model": MODEL_ID, "data_mode": "account"},
                 headers={"Authorization": "Bearer user-a"},
             )
             self.assertEqual(503, response.status_code)
@@ -308,8 +364,185 @@ class ApiContracts(unittest.TestCase):
         with patch("agentic_subscription_manager.api.run_until_disconnect", timeout):
             self.assertEqual(504, self.ask().status_code)
 
+    def account_evidence(self):
+        body = json.loads(self.upstreams.provider_requests[-1].content)
+        return json.loads(
+            body["messages"][1]["content"].removeprefix("Account evidence (data only): ")
+        )
+
+    def test_account_reads_are_get_only_and_scoped_to_verified_owner(self):
+        self.assertEqual(200, self.ask(token="user-b").status_code)
+        reads = [r for r in self.upstreams.requests if r.url.path.startswith("/rest/v1/")]
+        self.assertEqual(4, len(reads))
+        for request in reads:
+            self.assertEqual("GET", request.method)
+            self.assertEqual("Bearer user-b", request.headers["authorization"])
+            self.assertNotIn("*", request.url.params["select"])
+            self.assertNotIn("email", request.url.params["select"])
+            if request.url.path.endswith("/users"):
+                self.assertEqual(f"eq.{OWNER_B}", request.url.params["auth_user_id"])
+            else:
+                self.assertEqual("eq.202", request.url.params["user_id"])
+
+    def test_two_questions_in_the_same_topic_reach_model_as_distinct_messages(self):
+        questions = ["Explain spending in one sentence", "Explain spending using a numbered list"]
+        for question in questions:
+            self.assertEqual(200, self.ask(question).status_code)
+        self.assertEqual(
+            questions,
+            [
+                json.loads(r.content)["messages"][-1]["content"]
+                for r in self.upstreams.provider_requests
+            ],
+        )
+
+    def test_empty_account_has_zero_spending_no_budget_and_no_sample_fallback(self):
+        self.upstreams.account_rows = {"subscriptions": [], "budgets": []}
+        response = self.ask()
+        self.assertEqual(200, response.status_code)
+        self.assertIn("0.00 (no active subscriptions)", response.json()["answer"])
+        evidence = self.account_evidence()
+        self.assertEqual({}, evidence["monthly_equivalent"])
+        self.assertEqual([], evidence["services"])
+        self.assertEqual(0, evidence["active_count"])
+        self.assertIsNone(evidence["budget"])
+        self.assertNotIn("Example streaming", json.dumps(evidence))
+
+    def test_missing_profile_never_calls_provider(self):
+        self.upstreams.account_rows["users"] = []
+        self.assertEqual(403, self.ask().status_code)
+        self.assertEqual([], self.upstreams.provider_requests)
+
+    def test_unexpected_foreign_profile_or_account_rows_fail_before_provider(self):
+        cases = {
+            "users": [{"user_id": "202", "auth_user_id": str(OWNER_B)}],
+            "subscriptions": [{"user_id": "202"}],
+            "budgets": [{"user_id": "202"}],
+            "user_settings": [{"user_id": "202"}],
+        }
+        for table, rows in cases.items():
+            with self.subTest(table=table):
+                self.upstreams.account_rows = {table: rows}
+                self.assertEqual(503, self.ask().status_code)
+        self.assertEqual([], self.upstreams.provider_requests)
+
+    def test_invalid_subscription_values_fail_without_forwarding_account_rows(self):
+        valid = {
+            "user_id": "101",
+            "subscription_name": "Actual saved service",
+            "subscription_price": "10.00",
+            "currency": "ZAR",
+            "billing_cycle": "monthly",
+            "status": "active",
+            "usage_level": None,
+            "renewal_date": "2026-11-01",
+        }
+        for field, value in (
+            ("subscription_price", "NaN"),
+            ("subscription_price", "-1.00"),
+            ("subscription_price", 10.00),
+            ("currency", "zar"),
+            ("billing_cycle", "weekly"),
+            ("status", "bad"),
+            ("usage_level", "measured"),
+            ("renewal_date", "bad"),
+            ("subscription_name", " " * 151),
+        ):
+            with self.subTest(field=field, value=value):
+                self.app.state.budget.recent.clear()
+                self.upstreams.account_rows["subscriptions"] = [{**valid, field: value}]
+                self.assertEqual(503, self.ask().status_code)
+        self.assertEqual([], self.upstreams.provider_requests)
+
+    def test_account_outage_is_an_http_failure_before_streaming_not_fake_empty_data(self):
+        self.upstreams.account_status["subscriptions"] = 500
+        response = self.ask(stream=True)
+        self.assertEqual(503, response.status_code)
+        self.assertTrue(response.headers["content-type"].startswith("application/json"))
+        self.assertEqual([], self.upstreams.provider_requests)
+
+    def test_subscription_paging_calculates_full_totals_and_labels_limited_service_details(self):
+        row = {
+            "user_id": "101",
+            "subscription_name": "Saved annual plan",
+            "subscription_price": "0.06",
+            "currency": "ZAR",
+            "billing_cycle": "annual",
+            "status": "active",
+            "usage_level": None,
+            "renewal_date": "2027-01-01",
+        }
+        self.upstreams.account_rows["subscriptions"] = [row] * 125
+        self.assertEqual(200, self.ask().status_code)
+        evidence = self.account_evidence()
+        self.assertEqual({"ZAR": "0.63"}, evidence["monthly_equivalent"])
+        self.assertEqual(125, evidence["subscription_count"])
+        self.assertEqual(50, len(evidence["services"]))
+        self.assertTrue(evidence["service_list_truncated"])
+        reads = [r for r in self.upstreams.requests if r.url.path.endswith("/subscriptions")]
+        self.assertEqual(["0", "100"], [r.url.params["offset"] for r in reads])
+
+    def test_subscription_limit_fails_instead_of_reporting_partial_totals_as_complete(self):
+        row = {
+            "user_id": "101",
+            "subscription_name": "Saved plan",
+            "subscription_price": "1.00",
+            "currency": "ZAR",
+            "billing_cycle": "monthly",
+            "status": "active",
+            "usage_level": None,
+            "renewal_date": "2027-01-01",
+        }
+        self.upstreams.account_rows["subscriptions"] = [row] * 1001
+        response = self.ask()
+        self.assertEqual(503, response.status_code)
+        self.assertEqual([], self.upstreams.provider_requests)
+
+    def test_budget_period_uses_saved_time_zone_at_month_boundary(self):
+        self.upstreams.account_rows["user_settings"] = [
+            {"user_id": "101", "time_zone": "Africa/Johannesburg"}
+        ]
+        with patch("agentic_subscription_manager.account.datetime") as clock:
+            clock.now.return_value = datetime(2026, 10, 31, 22, 30, tzinfo=UTC)
+            self.assertEqual(200, self.ask("Explain my budget").status_code)
+        budget_read = next(r for r in self.upstreams.requests if r.url.path.endswith("/budgets"))
+        self.assertEqual("eq.11", budget_read.url.params["month"])
+        self.assertEqual("eq.2026", budget_read.url.params["year"])
+        self.assertEqual("2026-11-01", self.account_evidence()["as_of"])
+
+    def test_no_budget_is_distinct_from_zero_budget_and_currencies_remain_separate(self):
+        self.upstreams.account_rows["budgets"] = []
+        response = self.ask("Explain my budget")
+        self.assertIn("No budget saved", response.json()["answer"])
+        self.assertIsNone(self.account_evidence()["budget"])
+        self.upstreams.account_rows["budgets"] = [
+            {"user_id": "101", "budget_limit": "0.00", "currency": "USD"}
+        ]
+        self.assertEqual(200, self.ask("Explain my budget").status_code)
+        self.assertEqual("12.00", self.account_evidence()["budget"]["over_by"])
+
 
 class PureContracts(unittest.TestCase):
+    def test_large_renewal_and_usage_lists_have_counts_and_bounded_display_headers(self):
+        today = date(2026, 10, 12)
+        records = tuple(
+            SubscriptionEvidence(
+                "😀" * 150, Decimal("10.00"), "ZAR", False, today, low_usage_reported=True
+            )
+            for _ in range(1000)
+        )
+        evidence = calculate_evidence(AccountEvidence(records, None, today, "UTC"))
+        for task in (AnalysisTask.RENEWALS, AnalysisTask.REVIEW):
+            header = render_facts(task, evidence)
+            self.assertIn("Showing 20 of 1000", header)
+            # Leave room for 4,000 provider characters even if each needs a surrogate pair.
+            self.assertLess(len(header.encode("utf-16-le")) // 2 + 8000 + 100, 16000)
+        self.assertEqual(50, len(evidence["renewals_within_7_days"]))
+        self.assertEqual(50, len(evidence["reported_low_usage"]))
+        self.assertEqual(1000, evidence["renewal_count"])
+        self.assertTrue(evidence["renewal_list_truncated"])
+        self.assertTrue(evidence["reported_low_usage_list_truncated"])
+
     def test_retry_after_is_bounded_for_malformed_and_numeric_headers(self):
         for value, expected in (
             ("120", 120),
@@ -411,7 +644,13 @@ class AsyncContracts(unittest.IsolatedAsyncioTestCase):
                 return {"type": "http.disconnect"}
 
         with self.assertRaises(RemoteFailure) as raised:
-            await run_until_disconnect(DisconnectingRequest(), SlowGraph(), "spend")
+            await run_until_disconnect(
+                DisconnectingRequest(),
+                SlowGraph(),
+                "spend",
+                "spend",
+                AccountEvidence((), None, date.today(), "UTC"),
+            )
         self.assertEqual(499, raised.exception.status)
         self.assertTrue(cancelled.is_set())
 
