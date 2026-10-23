@@ -135,7 +135,7 @@ class StreamingContracts(unittest.TestCase):
             {"stream": "true"},
             {"tools": []},
             {"data_mode": "synthetic"},
-            {"model": "nvidia/nemotron-3.5-lightning:free"},
+            {"model": "nvidia/nemotron-3-super-120b-a12b:free"},
         ):
             self.assertEqual(422, self.ask(**fields).status_code)
         self.assertEqual([], self.upstreams.provider_requests)

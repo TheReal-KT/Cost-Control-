@@ -206,6 +206,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean gmailStatusRequestInFlight;
     private boolean gmailActionInFlight;
     private boolean gmailSyncing;
+    private boolean gmailConnectPendingResume;
     private boolean subscriptionsRefreshPending;
     private int gmailStatusGeneration;
     private int gmailOperationGeneration;
@@ -300,6 +301,13 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         activityResumed = true;
         if (session == null || authMode != null) return;
+        if (gmailConnectPendingResume) {
+            gmailConnectPendingResume = false;
+            if (rootScreen == RootScreen.PROFILE && routes.isEmpty()) {
+                renderCurrentRoute();
+                return;
+            }
+        }
         if (subscriptionsRefreshPending && routes.isEmpty()) {
             subscriptionsRefreshPending = false;
             renderCurrentRoute();
@@ -1075,7 +1083,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void connectGmail() {
-        if (!gmailStatusLoaded || !gmailConfigured || gmailActionInFlight || session == null) return;
+        boolean statusAllowsConnection = gmailStatusLoaded && gmailConfigured && !gmailConnected;
+        boolean statusCouldNotBeVerified = !gmailStatusLoaded && gmailStatusError != null;
+        if ((!statusAllowsConnection && !statusCouldNotBeVerified)
+                || gmailActionInFlight || session == null) return;
         gmailActionInFlight = true;
         gmailSyncing = false;
         int operation = ++gmailOperationGeneration;
@@ -1107,6 +1118,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl)));
+                    gmailConnectPendingResume = true;
                 } catch (ActivityNotFoundException exception) {
                     showSnackbar("No browser is available to connect Gmail.");
                 }

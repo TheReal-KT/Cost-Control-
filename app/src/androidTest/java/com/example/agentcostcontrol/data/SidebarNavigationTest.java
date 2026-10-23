@@ -6,12 +6,14 @@ import android.graphics.Canvas;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Gravity;
+import android.widget.TextView;
 
 import androidx.core.graphics.Insets;
 import androidx.core.view.GravityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.espresso.NoMatchingViewException;
@@ -174,6 +176,19 @@ public final class SidebarNavigationTest {
         }
     }
 
+    @Test public void returningFromGmailConnectionReloadsTheProfileScreen() throws Exception {
+        ReadOnlyAccount account = new ReadOnlyAccount();
+        try (ActivityScenario<MainActivity> scenario = launchProfileAccount(account)) {
+            waitForProfileGmail(scenario);
+
+            scenario.onActivity(activity -> setField(activity, "gmailConnectPendingResume", true));
+            scenario.moveToState(Lifecycle.State.STARTED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+
+            waitForProfileGmail(scenario);
+        }
+    }
+
     @Test public void shortScreensKeepHistoryReachableBelowAScrollableMenu() throws Exception {
         try (ActivityScenario<MainActivity> scenario = launchAccount(new ReadOnlyAccount())) {
             scenario.onActivity(activity -> activity.getWindow().setLayout(
@@ -241,6 +256,65 @@ public final class SidebarNavigationTest {
             scenario.close();
             throw error;
         }
+    }
+
+    private static ActivityScenario<MainActivity> launchProfileAccount(ReadOnlyAccount account) throws Exception {
+        Session session = account.repository.restoreSession();
+        UserProfile profile = account.repository.getCurrentProfile();
+        ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class);
+        try {
+            scenario.onActivity(activity -> {
+                AccountDataViewModel model = new ViewModelProvider(activity).get(AccountDataViewModel.class);
+                setField(model, "repository", account.repository);
+                setField(activity, "repository", account.repository);
+                try {
+                    Method enter = MainActivity.class.getDeclaredMethod("enterSignedInApp",
+                            Session.class, UserProfile.class);
+                    enter.setAccessible(true);
+                    enter.invoke(activity, session, profile);
+
+                    Field root = MainActivity.class.getDeclaredField("rootScreen");
+                    root.setAccessible(true);
+                    Object profileRoot = null;
+                    for (Object value : root.getType().getEnumConstants()) {
+                        if ("PROFILE".equals(value.toString())) profileRoot = value;
+                    }
+                    if (profileRoot == null) throw new AssertionError("Profile root is unavailable");
+                    Method switchRoot = MainActivity.class.getDeclaredMethod("switchRoot", root.getType());
+                    switchRoot.setAccessible(true);
+                    switchRoot.invoke(activity, profileRoot);
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError("Could not arrange the read-only profile account", error);
+                }
+            });
+            waitForProfileGmail(scenario);
+            return scenario;
+        } catch (AssertionError | RuntimeException error) {
+            scenario.close();
+            throw error;
+        }
+    }
+
+    private static void waitForProfileGmail(ActivityScenario<MainActivity> scenario) {
+        waitFor(() -> scenario.onActivity(activity -> {
+            TextView title = activity.findViewById(R.id.screen_title);
+            assertEquals("The profile route should be visible after Gmail returns",
+                    "Profile", title.getText().toString());
+            ViewGroup container = activity.findViewById(R.id.screen_container);
+            assertTrue("The screen should render content instead of remaining blank",
+                    container.getChildCount() > 0 && containsText(container, "Gmail connected")
+                            && containsText(container, "Sync subscriptions"));
+        }));
+    }
+
+    private static boolean containsText(View view, String expected) {
+        if (view instanceof TextView && expected.contentEquals(((TextView) view).getText())) return true;
+        if (!(view instanceof ViewGroup)) return false;
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            if (containsText(group.getChildAt(index), expected)) return true;
+        }
+        return false;
     }
 
     private static void setField(Object target, String name, Object value) {
@@ -334,6 +408,9 @@ public final class SidebarNavigationTest {
         private String response(String url) throws org.json.JSONException {
             android.net.Uri uri = android.net.Uri.parse(url);
             String path = uri.getPath();
+            if ("/integrations/gmail".equals(path)) {
+                return new JSONObject().put("configured", true).put("connected", true).toString();
+            }
             if ("/auth/v1/user".equals(path)) {
                 return new JSONObject().put("id", USER_ID).put("email", "sidebar@example.invalid").toString();
             }

@@ -22,6 +22,26 @@ import static org.junit.Assert.fail;
 @RunWith(AndroidJUnit4.class)
 public final class LiveGmailConnectionTest {
     @Test
+    public void createsSafeConnectLinkWhenExplicitlyRequested() throws Exception {
+        Bundle arguments = InstrumentationRegistry.getArguments();
+        Assume.assumeTrue("true".equals(arguments.getString("verifyGmailConnect")));
+
+        SupabaseRepository repository = new SupabaseRepository(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        Session session = repository.restoreSession();
+        if (session == null) {
+            report("NEEDS_SIGN_IN", null);
+            Assume.assumeTrue("Sign in on the device before live Gmail verification", session != null);
+            return;
+        }
+
+        String redirectUrl = repository.createGmailConnectLink();
+        assertTrue("The authorization link must be HTTPS",
+                SupabaseRepository.isSafeConnectUrl(redirectUrl));
+        report("CONNECT_LINK_CREATED", null);
+    }
+
+    @Test
     public void checksRealGmailConnectionAndOptionallySyncsOwnedSubscriptions() throws Exception {
         Bundle arguments = InstrumentationRegistry.getArguments();
         Assume.assumeTrue("true".equals(arguments.getString("verifyGmail")));
@@ -31,16 +51,17 @@ public final class LiveGmailConnectionTest {
         Session session = repository.restoreSession();
         if (session == null) {
             report("NEEDS_SIGN_IN", null);
-            Assume.assumeTrue("Sign in on the emulator before live Gmail verification", session != null);
+            Assume.assumeTrue("Sign in on the device before live Gmail verification", session != null);
             return;
         }
 
         GmailConnection connection = repository.getGmailConnection();
         if (!connection.isConfigured()) fail("Live Gmail integration is not configured on the backend");
         if (!connection.isConnected()) {
-            Bundle details = new Bundle();
-            details.putString("redirect_url", repository.createGmailConnectLink());
-            report("CONNECT_REQUIRED", details);
+            String redirectUrl = repository.createGmailConnectLink();
+            assertTrue("The authorization link must be HTTPS",
+                    SupabaseRepository.isSafeConnectUrl(redirectUrl));
+            report("CONNECT_REQUIRED", null);
             Assume.assumeTrue("Authorize Gmail before live connection verification", connection.isConnected());
             return;
         }

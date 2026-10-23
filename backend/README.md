@@ -64,10 +64,18 @@ adb shell am instrument -w -r -e class com.example.agentcostcontrol.data.LiveGma
 
 It reports `NEEDS_SIGN_IN` or `CONNECT_REQUIRED` and marks incomplete authorization as skipped. A connection link authorizes the actual signed-in app user. After completing Gmail consent, adding `-e syncGmail true` before the instrumentation component explicitly opts into one real discovery/import and owner-scoped reload. Results contain counts only; tokens, email bodies and keys are never exported. A passing connection check alone is not a verified mailbox scan.
 
+With the same APKs installed and the app signed in, verify the real model response and streaming path:
+
+```powershell
+adb shell am instrument -w -r -e class com.example.agentcostcontrol.chat.LiveAiModelTest -e verifyAi true com.example.agentcostcontrol.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+This sends one question through the authenticated backend and checks that the model answers it and the completed text matches the streamed text. It reports only the model ID and response lengths. A missing sign-in skips the check; a skipped check does not establish live provider success.
+
 ```json
 {
   "prompt": "Explain my monthly spend",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "model": "nvidia/nemotron-3.5-lightning:free",
   "data_mode": "account",
   "stream": true
 }
@@ -101,7 +109,7 @@ The two graph nodes live in `src/agentic_subscription_manager/workflow.py`. The 
 
 **Chat uses real account records, as explicitly requested for the local demonstration.** The question and relevant account facts are sent to OpenRouter. No tokens, Auth/profile IDs, email addresses or passwords are added to provider messages. Records are untrusted data in user-role messages, not system instructions. An empty account produces zero spending and no saved budget; there is no sample fallback. Account-read failures stop the request before inference instead of masquerading as empty data. Gmail subscription discovery imports eligible records into Supabase so the existing Android account screens and chat account reads can use them. Saved chat history is display-only, so follow-up questions must include their context.
 
-Using [Nemotron 3 Super free](https://openrouter.ai/nvidia/nemotron-3-super-120b-a12b:free) does not establish a private-data guarantee. The local demo sends the requested account facts under the configured OpenRouter/provider policies. Review those policies and account data controls before distributing the application; this change does not claim zero retention or training exclusion. [Provider data guidance](https://openrouter.ai/docs/guides/privacy/logging). See [ADR 0005](../docs/adr/0005-real-account-ai-chat.md) for the explicit change from the earlier fictional-only decision.
+Using [Nemotron 3.5 Lightning free](https://openrouter.ai/nvidia/nemotron-3.5-lightning:free) does not establish a private-data guarantee. The local demo sends the requested account facts under the configured OpenRouter/provider policies. Review those policies and account data controls before distributing the application; this change does not claim zero retention or training exclusion. [Provider data guidance](https://openrouter.ai/docs/guides/privacy/logging). See [ADR 0005](../docs/adr/0005-real-account-ai-chat.md) and [ADR 0007](../docs/adr/0007-chat-model-availability.md) for the account-data flow and model selection.
 
 The provider request uses the fixed `:free` model, 400 maximum output tokens, disabled reasoning, `tool_choice: none` and disabled provider fallback. Reasoning shares the output budget and otherwise can consume all 400 tokens without a visible answer. There is no tools list or action executor. It does not retry failed calls or substitute a paid model. Empty, wrong-type, overlong, malformed, tool-call and incomplete responses fail; model prose remains generated content, not a guarantee of factual correctness.
 

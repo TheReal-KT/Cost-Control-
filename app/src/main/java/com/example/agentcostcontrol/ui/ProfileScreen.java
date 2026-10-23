@@ -134,9 +134,12 @@ public final class ProfileScreen {
                 margin(context, 0, 4, 0, 0));
 
         String connectLabel = gmail.connected ? "Gmail connected"
-                : gmail.working ? "Preparing Gmail connection…" : "Connect Gmail";
+                : gmail.working ? "Preparing Gmail connection…"
+                : gmail.statusError != null ? "Try connecting Gmail" : "Connect Gmail";
         MaterialButton connect = Ui.button(context, connectLabel, !gmail.connected);
-        connect.setEnabled(gmail.statusLoaded && gmail.configured && !gmail.connected && !gmail.working);
+        boolean canConnect = (gmail.statusLoaded && gmail.configured && !gmail.connected)
+                || gmail.statusError != null;
+        connect.setEnabled(canConnect && !gmail.connected && !gmail.working);
         connect.setOnClickListener(view -> actions.onConnectGmail());
         cardContent.addView(connect, margin(context, 0, 12, 0, 6));
 

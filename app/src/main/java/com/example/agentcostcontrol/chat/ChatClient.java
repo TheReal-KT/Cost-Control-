@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 
 /** Calls the authenticated application backend, never the model provider directly. */
 public final class ChatClient {
-    public static final String MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
+    public static final String MODEL_ID = "nvidia/nemotron-3.5-lightning:free";
     private volatile HttpURLConnection activeConnection;
 
     public static final class Reply {
