@@ -33,6 +33,7 @@ public final class HomeScreen {
         void onOpenReminders();
         void onOpenService(Subscription subscription);
         void onOpenReminder(Reminder reminder);
+        void onOpenGmailConnection();
     }
 
     private HomeScreen() { }
@@ -67,6 +68,18 @@ public final class HomeScreen {
         addQuickAction(context, quickActions, "Reminder", R.drawable.ic_nav_reminders, actions::onAddReminder);
         addQuickAction(context, quickActions, "Services", R.drawable.ic_nav_services, actions::onOpenServices);
         page.addView(quickActions, margin(context, 0, 26, 0, 26));
+
+        LinearLayout gmailContent = Ui.column(context);
+        gmailContent.setPadding(Ui.dp(context, 16), Ui.dp(context, 14),
+                Ui.dp(context, 16), Ui.dp(context, 14));
+        gmailContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
+        gmailContent.addView(Ui.secondary(context,
+                "Connect Gmail in Services. Scanning starts only when you tap Sync subscriptions."),
+                margin(context, 0, 6, 0, 10));
+        MaterialButton gmailButton = Ui.button(context, "Set up Gmail connection", false);
+        gmailButton.setOnClickListener(view -> actions.onOpenGmailConnection());
+        gmailContent.addView(gmailButton);
+        page.addView(Ui.card(context, gmailContent), margin(context, 0, 0, 0, 24));
 
         LinearLayout servicesHeading = Ui.row(context);
         servicesHeading.addView(Ui.section(context, context.getString(R.string.home_services)),

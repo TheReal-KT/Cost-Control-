@@ -264,7 +264,16 @@ class ApiContracts(unittest.TestCase):
 
     def test_legacy_auth_crud_and_schema_routes_are_absent(self):
         paths = self.client.get("/openapi.json").json()["paths"]
-        self.assertEqual({"/health", "/ai/chat"}, set(paths))
+        self.assertEqual(
+            {
+                "/health",
+                "/ai/chat",
+                "/integrations/gmail",
+                "/integrations/gmail/connect",
+                "/integrations/subscriptions/sync",
+            },
+            set(paths),
+        )
         for path in ("/login", "/add_user", "/user/202", "/subscriptions", "/budgets"):
             self.assertEqual(404, self.client.get(path).status_code)
 

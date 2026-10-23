@@ -111,6 +111,7 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
                     @Override public void onOpenReminders() { explainReadOnly(); }
                     @Override public void onOpenService(Subscription service) { showDetail(service); }
                     @Override public void onOpenReminder(Reminder reminder) { explainReadOnly(); }
+                    @Override public void onOpenGmailConnection() { showServices(); }
                 }));
     }
 
@@ -118,12 +119,17 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
         showingHome = false;
         navigation.setCheckedItem(R.id.nav_subscriptions);
         show("Services preview", ServicesScreen.create(this, subscriptions, query, filter, false,
+                new ServicesScreen.GmailState(true, false, false, false, false,
+                        "Demo preview does not connect Gmail."),
                 new ServicesScreen.Actions() {
                     @Override public void onAdd() { explainReadOnly(); }
                     @Override public void onOpen(Subscription service) { showDetail(service); }
                     @Override public void onSearchChanged(String value) { query = value; }
                     @Override public void onFilterChanged(String value) { filter = value; }
                     @Override public void onLoadMore() { }
+                    @Override public void onConnectGmail() { explainReadOnly(); }
+                    @Override public void onSyncSubscriptions() { explainReadOnly(); }
+                    @Override public void onRefreshGmail() { explainReadOnly(); }
                 }));
     }
 

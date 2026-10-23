@@ -51,6 +51,10 @@ This builds and installs the current debug application through Gradle, then laun
 
 ### Connect the emulator to local AI
 
+Prepare the backend first with `pwsh -File scripts/Initialize-Backend.ps1`. It preserves existing configuration and can run while the owner is creating the Composio key. Add that key to ignored `backend/.env` when available, then restart the backend.
+
+Gmail discovery uses this same HTTPS backend. After configuring `COMPOSIO_API_KEY` on the server, open **Services → Connect Gmail**, complete the browser authorization, return to the app, and tap **Sync subscriptions**. Successful imports reload Services and Home spending. The scan only imports supported messages with explicit recurring billing and renewal evidence; it can miss subscriptions, and existing saved services are preserved. See [backend setup](backend/README.md) and [the integration decision](docs/adr/0006-gmail-subscription-discovery.md).
+
 Configure ignored `backend/.env` as described in [backend setup](backend/README.md), start one emulator, and run from the repository root using PowerShell 7:
 
 ```powershell

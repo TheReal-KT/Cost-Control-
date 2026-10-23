@@ -9,6 +9,7 @@ import com.example.agentcostcontrol.model.BudgetDraft;
 import com.example.agentcostcontrol.model.ChatConversation;
 import com.example.agentcostcontrol.model.ChatTurn;
 import com.example.agentcostcontrol.model.DecisionStatus;
+import com.example.agentcostcontrol.model.GmailConnection;
 import com.example.agentcostcontrol.model.Recommendation;
 import com.example.agentcostcontrol.model.RecommendationAction;
 import com.example.agentcostcontrol.model.Reminder;
@@ -19,6 +20,7 @@ import com.example.agentcostcontrol.model.SignUpResult;
 import com.example.agentcostcontrol.model.Subscription;
 import com.example.agentcostcontrol.model.SubscriptionDraft;
 import com.example.agentcostcontrol.model.SubscriptionImportance;
+import com.example.agentcostcontrol.model.SubscriptionSyncResult;
 import com.example.agentcostcontrol.model.SubscriptionStatus;
 import com.example.agentcostcontrol.model.UsageLevel;
 import com.example.agentcostcontrol.model.UserDecision;
@@ -31,6 +33,8 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -49,6 +53,8 @@ import java.util.UUID;
 /** Synchronous Supabase Auth and REST client. Call its methods from a worker thread. */
 public final class SupabaseRepository implements ChatHistoryRepository {
     private static final int MAX_PAGE_SIZE = 100;
+    private static final int DEFAULT_BACKEND_READ_TIMEOUT_MILLIS = 20_000;
+    private static final int GMAIL_SYNC_READ_TIMEOUT_MILLIS = 90_000;
     private static final long SESSION_REFRESH_SKEW_SECONDS = 60;
 
     private static final String PROFILE_SELECT =
@@ -70,6 +76,7 @@ public final class SupabaseRepository implements ChatHistoryRepository {
             "conversation_id,turn_id,question,answer,status,created_at,updated_at";
 
     private final String baseUrl;
+    private final String backendRoot;
     private final String publishableKey;
     private final HttpTransport transport;
     private final SessionPersistence sessionPersistence;
@@ -83,16 +90,68 @@ public final class SupabaseRepository implements ChatHistoryRepository {
 
     public SupabaseRepository(Context context) {
         this(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_PUBLISHABLE_KEY,
-                new HttpTransport.UrlConnection(), new SecureSessionStore(context), Clock.systemUTC());
+                new HttpTransport.UrlConnection(), new SecureSessionStore(context), Clock.systemUTC(),
+                BuildConfig.AI_ENDPOINT_URL);
     }
 
     SupabaseRepository(String baseUrl, String publishableKey, HttpTransport transport,
                        SessionPersistence sessionPersistence, Clock clock) {
+        this(baseUrl, publishableKey, transport, sessionPersistence, clock, BuildConfig.AI_ENDPOINT_URL);
+    }
+
+    SupabaseRepository(String baseUrl, String publishableKey, HttpTransport transport,
+                       SessionPersistence sessionPersistence, Clock clock, String aiEndpointUrl) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
+        this.backendRoot = backendRootFromAiEndpoint(aiEndpointUrl);
         this.publishableKey = publishableKey == null ? "" : publishableKey.trim();
         this.transport = Objects.requireNonNull(transport, "transport");
         this.sessionPersistence = Objects.requireNonNull(sessionPersistence, "sessionPersistence");
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    public GmailConnection getGmailConnection() throws ApiException {
+        SessionSnapshot snapshot = requireSessionSnapshot();
+        JSONObject response = backendObject("GET", "/integrations/gmail", null, snapshot);
+        boolean configured = requiredBoolean(response, "configured");
+        boolean connected = requiredBoolean(response, "connected");
+        if (connected && !configured) {
+            throw dataFormat("The Gmail connection response is invalid", null);
+        }
+        return new GmailConnection(configured, connected);
+    }
+
+    public String createGmailConnectLink() throws ApiException {
+        SessionSnapshot snapshot = requireSessionSnapshot();
+        JSONObject response = backendObject("POST", "/integrations/gmail/connect", new JSONObject(), snapshot);
+        String redirectUrl = requiredString(response, "redirect_url");
+        if (!isSafeConnectUrl(redirectUrl)) {
+            throw dataFormat("The Gmail connection response is invalid", null);
+        }
+        return redirectUrl;
+    }
+
+    SubscriptionSyncResult syncSubscriptionsFromGmail() throws ApiException {
+        return syncSubscriptionsFromGmail(null);
+    }
+
+    public SubscriptionSyncResult syncSubscriptionsFromGmail(String expectedAuthUserId) throws ApiException {
+        SessionSnapshot snapshot = expectedAuthUserId == null
+                ? requireSessionSnapshot() : requireSessionSnapshot(expectedAuthUserId);
+        try {
+            JSONObject response = backendObject("POST", "/integrations/subscriptions/sync", new JSONObject(), snapshot);
+            int imported = requiredNonNegativeInt(response, "imported");
+            int skipped = requiredNonNegativeInt(response, "skipped");
+            int scanned = requiredNonNegativeInt(response, "scanned");
+            boolean hasMore = requiredBoolean(response, "has_more");
+            String message = requiredString(response, "message").trim();
+            if (message.length() > 240) message = message.substring(0, 240);
+            return new SubscriptionSyncResult(imported, skipped, scanned, hasMore, message);
+        } catch (ApiException error) {
+            if (error.getCategory() == ApiException.Category.DATA_FORMAT) {
+                throw gmailSyncOutcomeUnknown(200, error);
+            }
+            throw error;
+        }
     }
 
     public Session signIn(String email, String password) throws ApiException {
@@ -573,6 +632,128 @@ public final class SupabaseRepository implements ChatHistoryRepository {
         }
     }
 
+    private JSONObject backendObject(String method, String path, JSONObject body, SessionSnapshot snapshot)
+            throws ApiException {
+        ensureBackendConfiguration();
+        int readTimeoutMillis = "/integrations/subscriptions/sync".equals(path)
+                ? GMAIL_SYNC_READ_TIMEOUT_MILLIS : DEFAULT_BACKEND_READ_TIMEOUT_MILLIS;
+        HttpTransport.Response response;
+        try {
+            response = sendBackend(method, path, body, snapshot, readTimeoutMillis);
+            if (response.statusCode == 401 && "GET".equals(method)) {
+                SessionSnapshot refreshed = refreshAfterUnauthorized(snapshot);
+                snapshot.session = refreshed.session;
+                snapshot.generation = refreshed.generation;
+                response = sendBackend(method, path, body, snapshot, readTimeoutMillis);
+            } else if (response.statusCode == 401) {
+                refreshAfterUnauthorized(snapshot);
+                throw retryRequired();
+            }
+        } catch (IOException exception) {
+            if ("POST".equals(method) && "/integrations/subscriptions/sync".equals(path)) {
+                throw gmailSyncOutcomeUnknown(0, exception);
+            }
+            throw networkFailure(exception);
+        }
+        if (!isSuccess(response.statusCode)) {
+            if ("POST".equals(method) && "/integrations/subscriptions/sync".equals(path)
+                    && response.statusCode >= 500) {
+                throw gmailSyncOutcomeUnknown(response.statusCode, null);
+            }
+            throw backendResponseError(response.statusCode);
+        }
+        try {
+            return new JSONObject(response.body);
+        } catch (JSONException exception) {
+            throw dataFormat("The Gmail service returned an invalid response", exception);
+        }
+    }
+
+    private HttpTransport.Response sendBackend(String method, String path, JSONObject body,
+                                               SessionSnapshot snapshot, int readTimeoutMillis)
+            throws IOException, ApiException {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Accept", "application/json");
+        if (body != null) headers.put("Content-Type", "application/json; charset=utf-8");
+        synchronized (authLock) {
+            Session current = currentSessionLocked();
+            if (current == null || !current.getAuthUserId().equals(snapshot.session.getAuthUserId())) {
+                throw authRequired();
+            }
+            snapshot.session = current;
+            snapshot.generation = authGeneration;
+            headers.put("Authorization", "Bearer " + current.getAccessToken());
+            return transport.execute(method, backendRoot + path, headers,
+                    body == null ? null : body.toString(), readTimeoutMillis);
+        }
+    }
+
+    private void ensureBackendConfiguration() throws ApiException {
+        if (backendRoot.isEmpty()) {
+            throw new ApiException(ApiException.Category.CONFIGURATION,
+                    "Gmail scanning is not configured yet.", "CONFIGURATION", 0);
+        }
+    }
+
+    private static ApiException backendResponseError(int statusCode) {
+        ApiException.Category category;
+        String message;
+        if (statusCode == 403) {
+            category = ApiException.Category.FORBIDDEN;
+            message = "You do not have access to this Gmail connection.";
+        } else if (statusCode == 404) {
+            category = ApiException.Category.NOT_FOUND;
+            message = "Gmail connections are unavailable right now.";
+        } else if (statusCode == 429) {
+            category = ApiException.Category.SERVER;
+            message = "Too many requests. Wait a moment, then try again.";
+        } else if (statusCode >= 500) {
+            category = ApiException.Category.SERVER;
+            message = "The Gmail service is temporarily unavailable. Try again.";
+        } else {
+            category = ApiException.Category.SERVER;
+            message = "The Gmail request could not be completed. Try again.";
+        }
+        return new ApiException(category, message, "GMAIL_REQUEST_FAILED", statusCode);
+    }
+
+    private static ApiException gmailSyncOutcomeUnknown(int statusCode, Throwable cause) {
+        return new ApiException(ApiException.Category.NETWORK,
+                "We could not confirm whether Gmail sync finished. Services will reload; check the list before trying again.",
+                "GMAIL_SYNC_OUTCOME_UNKNOWN", statusCode, cause);
+    }
+
+    static String backendRootFromAiEndpoint(String endpoint) {
+        if (endpoint == null || endpoint.trim().isEmpty()) return "";
+        try {
+            URI uri = new URI(endpoint.trim()).normalize();
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+                return "";
+            }
+            String path = uri.getRawPath();
+            if (path == null) return "";
+            if (path.endsWith("/")) path = path.substring(0, path.length() - 1);
+            String aiPath = "/ai/chat";
+            if (!path.endsWith(aiPath)) return "";
+            String basePath = path.substring(0, path.length() - aiPath.length());
+            return "https://" + uri.getRawAuthority() + basePath;
+        } catch (URISyntaxException exception) {
+            return "";
+        }
+    }
+
+    static boolean isSafeConnectUrl(String value) {
+        if (value == null || value.trim().isEmpty() || value.length() > 4096) return false;
+        try {
+            URI uri = new URI(value.trim());
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null
+                    && uri.getUserInfo() == null && uri.getFragment() == null;
+        } catch (URISyntaxException exception) {
+            return false;
+        }
+    }
+
     private HttpTransport.Response sendMutation(String method, String path, JSONObject body,
                                                 SessionSnapshot snapshot, String prefer)
             throws IOException, ApiException {
@@ -656,6 +837,14 @@ public final class SupabaseRepository implements ChatHistoryRepository {
         synchronized (authLock) {
             Session session = currentSessionLocked();
             if (session == null) throw authRequired();
+            return new SessionSnapshot(session, authGeneration);
+        }
+    }
+
+    private SessionSnapshot requireSessionSnapshot(String expectedAuthUserId) throws ApiException {
+        synchronized (authLock) {
+            Session session = currentSessionLocked();
+            if (session == null || !expectedAuthUserId.equals(session.getAuthUserId())) throw authRequired();
             return new SessionSnapshot(session, authGeneration);
         }
     }
@@ -1074,6 +1263,12 @@ public final class SupabaseRepository implements ChatHistoryRepository {
         } catch (NumberFormatException exception) {
             throw dataFormat("The service returned an invalid number", exception);
         }
+    }
+
+    private static int requiredNonNegativeInt(JSONObject row, String field) throws ApiException {
+        int value = requiredInt(row, field);
+        if (value < 0) throw dataFormat("The Gmail service returned an invalid count", null);
+        return value;
     }
 
     private static boolean requiredBoolean(JSONObject row, String field) throws ApiException {

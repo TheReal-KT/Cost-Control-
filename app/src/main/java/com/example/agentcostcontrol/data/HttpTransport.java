@@ -12,6 +12,11 @@ import java.util.Map;
 interface HttpTransport {
     Response execute(String method, String url, Map<String, String> headers, String body) throws IOException;
 
+    default Response execute(String method, String url, Map<String, String> headers, String body,
+                             int readTimeoutMillis) throws IOException {
+        return execute(method, url, headers, body);
+    }
+
     final class Response {
         final int statusCode;
         final String body;
@@ -30,12 +35,21 @@ interface HttpTransport {
         @Override
         public Response execute(String method, String url, Map<String, String> headers, String body)
                 throws IOException {
+            return execute(method, url, headers, body, READ_TIMEOUT_MILLIS);
+        }
+
+        @Override
+        public Response execute(String method, String url, Map<String, String> headers, String body,
+                                int readTimeoutMillis) throws IOException {
+            if (readTimeoutMillis < 1_000 || readTimeoutMillis > 120_000) {
+                throw new IllegalArgumentException("Read timeout is outside the supported range");
+            }
             HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
             try {
                 connection.setInstanceFollowRedirects(false);
                 connection.setRequestMethod(method);
                 connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
-                connection.setReadTimeout(READ_TIMEOUT_MILLIS);
+                connection.setReadTimeout(readTimeoutMillis);
                 connection.setUseCaches(false);
                 headers.forEach(connection::setRequestProperty);
                 if (body != null) {

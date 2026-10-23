@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "anyio>=4.15,<5",
+    "composio==0.30.0",
+    # The SDK pins this prerelease; declaring it explicitly keeps uv's default resolver usable.
+    "composio-client==2.0.0rc19",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "langgraph>=1.0,<2",
@@ -16,6 +19,10 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff>=0.11,<1"]
+
+[tool.uv]
+# OneDrive rejects package-cache hardlinks; copying also works on ordinary filesystems.
+link-mode = "copy"
 
 [tool.ruff]
 target-version = "py311"

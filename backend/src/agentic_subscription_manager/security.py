@@ -18,6 +18,8 @@ class Settings:
     publishable_key: str = field(default="", repr=False)
     provider_key: str = field(default="", repr=False)
     conversation_secret: str = field(default="", repr=False)
+    composio_api_key: str = field(default="", repr=False)
+    composio_gmail_auth_config_id: str = ""
 
     def __post_init__(self) -> None:
         if self.supabase_url:
@@ -44,16 +46,21 @@ class Settings:
             os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
             os.getenv("OPENROUTER_API_KEY", ""),
             os.getenv("AI_CONVERSATION_SECRET", ""),
+            os.getenv("COMPOSIO_API_KEY", ""),
+            os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID", ""),
         )
 
     @property
+    def identity_configured(self) -> bool:
+        return bool(self.supabase_url and self.publishable_key)
+
+    @property
+    def composio_configured(self) -> bool:
+        return bool(self.composio_api_key)
+
+    @property
     def configured(self) -> bool:
-        return bool(
-            self.supabase_url
-            and self.publishable_key
-            and self.provider_key
-            and self.conversation_secret
-        )
+        return bool(self.identity_configured and self.provider_key and self.conversation_secret)
 
 
 class ConversationIds:

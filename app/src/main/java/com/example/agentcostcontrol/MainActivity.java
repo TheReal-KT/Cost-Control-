@@ -1,6 +1,9 @@
 package com.example.agentcostcontrol;
 
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -32,6 +35,7 @@ import com.example.agentcostcontrol.domain.FinancialSummaryCalculator;
 import com.example.agentcostcontrol.model.Budget;
 import com.example.agentcostcontrol.model.BudgetDraft;
 import com.example.agentcostcontrol.model.DecisionStatus;
+import com.example.agentcostcontrol.model.GmailConnection;
 import com.example.agentcostcontrol.model.Recommendation;
 import com.example.agentcostcontrol.model.Reminder;
 import com.example.agentcostcontrol.model.ReminderDraft;
@@ -39,6 +43,7 @@ import com.example.agentcostcontrol.model.ReminderStatus;
 import com.example.agentcostcontrol.model.Session;
 import com.example.agentcostcontrol.model.Subscription;
 import com.example.agentcostcontrol.model.SubscriptionDraft;
+import com.example.agentcostcontrol.model.SubscriptionSyncResult;
 import com.example.agentcostcontrol.model.UserDecision;
 import com.example.agentcostcontrol.model.UserProfile;
 import com.example.agentcostcontrol.ui.AiChatView;
@@ -170,8 +175,10 @@ public class MainActivity extends AppCompatActivity {
     private final EnumMap<RootScreen, Integer> rootScrollPositions = new EnumMap<>(RootScreen.class);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService dataWorker = Executors.newSingleThreadExecutor();
+    private final AccountDataViewModel.GmailSyncObserver gmailSyncObserver = this::onGmailSyncChanged;
 
     private SupabaseRepository repository;
+    private AccountDataViewModel accountDataViewModel;
     private Session session;
     private UserProfile profile;
     private RootScreen rootScreen = RootScreen.HOME;
@@ -192,6 +199,17 @@ public class MainActivity extends AppCompatActivity {
     private RouteType uncertainWriteRoute;
     private boolean uncertainWriteDialogVisible;
     private boolean uncertainListChecked;
+    private boolean activityResumed;
+    private boolean gmailStatusLoaded;
+    private boolean gmailConfigured;
+    private boolean gmailConnected;
+    private boolean gmailStatusRequestInFlight;
+    private boolean gmailActionInFlight;
+    private boolean gmailSyncing;
+    private boolean subscriptionsRefreshPending;
+    private int gmailStatusGeneration;
+    private int gmailOperationGeneration;
+    private String gmailStatusError;
     private Bundle suspendedFormState;
     private RouteType suspendedFormRoute;
     private long suspendedFormId = -1;
@@ -229,7 +247,9 @@ public class MainActivity extends AppCompatActivity {
                     .setAppearanceLightNavigationBars(false);
         }
         setContentView(R.layout.activity_main);
-        repository = new ViewModelProvider(this).get(AccountDataViewModel.class).getRepository();
+        accountDataViewModel = new ViewModelProvider(this).get(AccountDataViewModel.class);
+        repository = accountDataViewModel.getRepository();
+        accountDataViewModel.addGmailSyncObserver(gmailSyncObserver);
 
         screenContainer = findViewById(R.id.screen_container);
         screenTitle = findViewById(R.id.screen_title);
@@ -273,6 +293,25 @@ public class MainActivity extends AppCompatActivity {
             @Override public void handleOnBackPressed() { navigateBack(); }
         });
         restoreAuthentication();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        activityResumed = true;
+        if (session == null || authMode != null) return;
+        if (subscriptionsRefreshPending && routes.isEmpty()) {
+            subscriptionsRefreshPending = false;
+            renderCurrentRoute();
+        } else if (rootScreen == RootScreen.SERVICES && routes.isEmpty()) {
+            refreshGmailStatus();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        activityResumed = false;
+        super.onPause();
     }
 
     private void applyInsets() {
@@ -480,6 +519,7 @@ public class MainActivity extends AppCompatActivity {
                 authMode = null;
                 authMessage = "";
                 renderCurrentRoute();
+                onGmailSyncChanged(accountDataViewModel.getGmailSyncState());
             });
         });
     }
@@ -851,6 +891,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void renderCurrentRoute() {
         loadingMore = false;
+        if (routes.isEmpty()) subscriptionsRefreshPending = false;
         if (authMode != null || session == null) {
             if (authMode == null) authMode = AuthScreen.Mode.SIGN_IN;
             renderAuthentication();
@@ -907,6 +948,7 @@ public class MainActivity extends AppCompatActivity {
                     uncertainListChecked = true;
                 }
                 renderPage(result);
+                if (requestedRoot == RootScreen.SERVICES && routes.isEmpty()) refreshGmailStatus();
             });
         });
     }
@@ -990,6 +1032,183 @@ public class MainActivity extends AppCompatActivity {
         }
         data.subscriptionsComplete = repository.listSubscriptions(1, MAX_SUMMARY_PAGES * PAGE_SIZE).isEmpty();
         data.subscriptions = all;
+    }
+
+    private void refreshGmailStatus() {
+        if (!activityResumed || session == null || authMode != null || rootScreen != RootScreen.SERVICES
+                || !routes.isEmpty() || gmailStatusRequestInFlight || gmailActionInFlight) return;
+        gmailStatusRequestInFlight = true;
+        int request = ++gmailStatusGeneration;
+        int navigation = navigationGeneration;
+        String authUserId = session.getAuthUserId();
+        dataWorker.execute(() -> {
+            GmailConnection result = null;
+            ApiException failure = null;
+            try { result = repository.getGmailConnection(); }
+            catch (ApiException error) { failure = error; }
+            GmailConnection resultConnection = result;
+            ApiException resultFailure = failure;
+            Session resultSession = repository.getCurrentSession();
+            mainHandler.post(() -> {
+                if (request != gmailStatusGeneration) return;
+                gmailStatusRequestInFlight = false;
+                if (!isCurrentAccount(authUserId)) return;
+                syncSessionSnapshot(resultSession, authUserId);
+                if (resultFailure != null && resultFailure.getCategory() == ApiException.Category.AUTH_REQUIRED) {
+                    requireSignInAfterIntegrationFailure(resultFailure);
+                    return;
+                }
+                if (resultFailure != null) {
+                    gmailStatusLoaded = false;
+                    gmailConfigured = false;
+                    gmailConnected = false;
+                    gmailStatusError = resultFailure.getUserMessage();
+                } else {
+                    gmailStatusLoaded = true;
+                    gmailConfigured = resultConnection.isConfigured();
+                    gmailConnected = resultConnection.isConnected();
+                    gmailStatusError = null;
+                }
+                if (isCurrentServiceView(navigation, authUserId)) renderServiceIntegrationState();
+            });
+        });
+    }
+
+    private void connectGmail() {
+        if (!gmailStatusLoaded || !gmailConfigured || gmailActionInFlight || session == null) return;
+        gmailActionInFlight = true;
+        gmailSyncing = false;
+        int operation = ++gmailOperationGeneration;
+        String authUserId = session.getAuthUserId();
+        renderServiceIntegrationState();
+        int navigation = navigationGeneration;
+        dataWorker.execute(() -> {
+            String redirectUrl = null;
+            ApiException failure = null;
+            try { redirectUrl = repository.createGmailConnectLink(); }
+            catch (ApiException error) { failure = error; }
+            String resultUrl = redirectUrl;
+            ApiException resultFailure = failure;
+            Session resultSession = repository.getCurrentSession();
+            mainHandler.post(() -> {
+                if (operation != gmailOperationGeneration) return;
+                gmailActionInFlight = false;
+                if (!isCurrentAccount(authUserId)) return;
+                syncSessionSnapshot(resultSession, authUserId);
+                if (resultFailure != null && resultFailure.getCategory() == ApiException.Category.AUTH_REQUIRED) {
+                    requireSignInAfterIntegrationFailure(resultFailure);
+                    return;
+                }
+                if (!isCurrentServiceView(navigation, authUserId)) return;
+                renderServiceIntegrationState();
+                if (resultFailure != null) {
+                    showSnackbar(resultFailure.getUserMessage());
+                    return;
+                }
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl)));
+                } catch (ActivityNotFoundException exception) {
+                    showSnackbar("No browser is available to connect Gmail.");
+                }
+            });
+        });
+    }
+
+    private void syncSubscriptionsFromGmail() {
+        if (!gmailStatusLoaded || !gmailConfigured || !gmailConnected
+                || gmailActionInFlight || session == null) return;
+        String authUserId = session.getAuthUserId();
+        if (!accountDataViewModel.startGmailSync(authUserId)) {
+            onGmailSyncChanged(accountDataViewModel.getGmailSyncState());
+            return;
+        }
+        gmailActionInFlight = true;
+        gmailSyncing = true;
+        renderServiceIntegrationState();
+    }
+
+    private void onGmailSyncChanged(AccountDataViewModel.GmailSyncState syncState) {
+        if (syncState == null || !isCurrentAccount(syncState.getAuthUserId())) return;
+        AccountDataViewModel.GmailSyncState currentState = accountDataViewModel.getGmailSyncState();
+        if (currentState == null || currentState.getGeneration() != syncState.getGeneration()) return;
+        if (syncState.isInProgress()) {
+            gmailActionInFlight = true;
+            gmailSyncing = true;
+            renderServiceIntegrationState();
+            return;
+        }
+
+        gmailActionInFlight = false;
+        gmailSyncing = false;
+        syncSessionSnapshot(syncState.getSession(), syncState.getAuthUserId());
+        ApiException failure = syncState.getFailure();
+        if (failure != null && failure.getCategory() == ApiException.Category.AUTH_REQUIRED) {
+            accountDataViewModel.acknowledgeGmailSync(syncState.getGeneration());
+            requireSignInAfterIntegrationFailure(failure);
+            return;
+        }
+        if (failure != null) {
+            if ("GMAIL_SYNC_OUTCOME_UNKNOWN".equals(failure.getServerCode())) {
+                pendingRootMessage = failure.getUserMessage();
+                if (!routes.isEmpty()) {
+                    subscriptionsRefreshPending = true;
+                } else if (activityResumed) {
+                    renderCurrentRoute();
+                } else {
+                    subscriptionsRefreshPending = true;
+                }
+            } else if (rootScreen == RootScreen.SERVICES && routes.isEmpty()) {
+                renderServiceIntegrationState();
+                showSnackbar(failure.getUserMessage());
+            }
+            accountDataViewModel.acknowledgeGmailSync(syncState.getGeneration());
+            return;
+        }
+
+        pendingRootMessage = syncSummary(syncState.getResult());
+        if (!routes.isEmpty()) {
+            subscriptionsRefreshPending = true;
+        } else if (activityResumed) {
+            renderCurrentRoute();
+        } else {
+            subscriptionsRefreshPending = true;
+        }
+        accountDataViewModel.acknowledgeGmailSync(syncState.getGeneration());
+    }
+
+    private String syncSummary(SubscriptionSyncResult result) {
+        String message = result.getMessage().trim();
+        if (message.isEmpty()) message = "Gmail scan complete.";
+        message += " Imported " + result.getImported() + ", skipped " + result.getSkipped()
+                + " of " + result.getScanned() + " scanned.";
+        if (result.hasMore()) message += " More matching email may remain.";
+        return message;
+    }
+
+    private void renderServiceIntegrationState() {
+        if (rootScreen != RootScreen.SERVICES || !routes.isEmpty() || session == null) return;
+        saveCurrentScrollPosition();
+        renderPage(currentData);
+    }
+
+    private boolean isCurrentServiceView(int navigation, String authUserId) {
+        return activityResumed && sameView(navigation, authUserId)
+                && rootScreen == RootScreen.SERVICES && routes.isEmpty();
+    }
+
+    private boolean isCurrentAccount(String authUserId) {
+        return !isFinishing() && session != null && authUserId.equals(session.getAuthUserId());
+    }
+
+    private void requireSignInAfterIntegrationFailure(ApiException error) {
+        if (session != null) protectedStateAuthUserId = session.getAuthUserId();
+        session = null;
+        profile = null;
+        clearProtectedState();
+        authMode = AuthScreen.Mode.SIGN_IN;
+        authMessage = error.getUserMessage();
+        authFormState = null;
+        renderAuthentication();
     }
 
     private void loadMore(RootScreen expectedRoot) {
@@ -1153,16 +1372,22 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onOpenReminders() { requestRoot(RootScreen.REMINDERS); }
                             @Override public void onOpenService(Subscription subscription) { openServiceDetail(subscription); }
                             @Override public void onOpenReminder(Reminder reminder) { openReminderDetail(reminder); }
+                            @Override public void onOpenGmailConnection() { requestRoot(RootScreen.SERVICES); }
                         });
             case SERVICES:
                 return ServicesScreen.create(this, data.subscriptions, serviceQuery, serviceFilter,
-                        data.hasMoreSubscriptions,
+                        data.hasMoreSubscriptions, new ServicesScreen.GmailState(gmailStatusLoaded,
+                                gmailConfigured, gmailConnected, gmailActionInFlight, gmailSyncing,
+                                gmailStatusError),
                         new ServicesScreen.Actions() {
                             @Override public void onAdd() { openSubscriptionForm(null); }
                             @Override public void onOpen(Subscription subscription) { openServiceDetail(subscription); }
                             @Override public void onSearchChanged(String query) { serviceQuery = query; }
                             @Override public void onFilterChanged(String filter) { serviceFilter = filter; }
                             @Override public void onLoadMore() { loadMore(RootScreen.SERVICES); }
+                            @Override public void onConnectGmail() { connectGmail(); }
+                            @Override public void onSyncSubscriptions() { syncSubscriptionsFromGmail(); }
+                            @Override public void onRefreshGmail() { refreshGmailStatus(); }
                         });
             case REMINDERS:
                 return RemindersScreen.list(this, data.reminders, data.subscriptions, reminderFilter,
@@ -1838,6 +2063,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearProtectedState() {
+        gmailStatusGeneration++;
+        gmailOperationGeneration++;
+        if (accountDataViewModel != null) accountDataViewModel.clearGmailSyncState();
+        gmailStatusLoaded = false;
+        gmailConfigured = false;
+        gmailConnected = false;
+        gmailStatusRequestInFlight = false;
+        gmailActionInFlight = false;
+        gmailSyncing = false;
+        subscriptionsRefreshPending = false;
+        gmailStatusError = null;
         routes.clear();
         currentData = new ScreenData();
         profile = null;
@@ -1966,6 +2202,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         loadGeneration++;
+        gmailStatusGeneration++;
+        gmailOperationGeneration++;
+        if (accountDataViewModel != null) {
+            accountDataViewModel.removeGmailSyncObserver(gmailSyncObserver);
+        }
         if (aiChatView != null) aiChatView.dispose();
         dataWorker.shutdownNow();
         super.onDestroy();

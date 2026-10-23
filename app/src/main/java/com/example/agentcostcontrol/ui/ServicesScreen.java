@@ -24,19 +24,42 @@ import java.util.List;
 import java.util.Locale;
 
 public final class ServicesScreen {
+    public static final class GmailState {
+        public final boolean statusLoaded;
+        public final boolean configured;
+        public final boolean connected;
+        public final boolean working;
+        public final boolean syncing;
+        public final String statusError;
+
+        public GmailState(boolean statusLoaded, boolean configured, boolean connected, boolean working,
+                          boolean syncing, String statusError) {
+            this.statusLoaded = statusLoaded;
+            this.configured = configured;
+            this.connected = connected;
+            this.working = working;
+            this.syncing = syncing;
+            this.statusError = statusError;
+        }
+    }
+
     public interface Actions {
         void onAdd();
         void onOpen(Subscription subscription);
         void onSearchChanged(String query);
         void onFilterChanged(String filter);
         void onLoadMore();
+        void onConnectGmail();
+        void onSyncSubscriptions();
+        void onRefreshGmail();
     }
 
     private ServicesScreen() { }
 
     public static View create(Context context, List<Subscription> subscriptions, String query,
-                              String filter, boolean hasMore, Actions actions) {
+                              String filter, boolean hasMore, GmailState gmail, Actions actions) {
         LinearLayout page = Ui.page(context);
+        addGmailConnection(context, page, gmail, actions);
         TextInputLayout searchField = Ui.field(context, "Search services", query,
                 android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         TextInputEditText search = (TextInputEditText) searchField.getEditText();
@@ -90,6 +113,50 @@ public final class ServicesScreen {
         });
 
         return Ui.scroll(context, page);
+    }
+
+    private static void addGmailConnection(Context context, LinearLayout page, GmailState gmail,
+                                           Actions actions) {
+        LinearLayout cardContent = Ui.column(context);
+        cardContent.setPadding(Ui.dp(context, 16), Ui.dp(context, 14),
+                Ui.dp(context, 16), Ui.dp(context, 14));
+        cardContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
+
+        String connectionStatus;
+        if (gmail.statusError != null && !gmail.statusError.trim().isEmpty()) {
+            connectionStatus = gmail.statusError;
+        } else if (!gmail.statusLoaded) {
+            connectionStatus = "Checking your Gmail connection…";
+        } else if (!gmail.configured) {
+            connectionStatus = "Gmail scanning is not configured yet.";
+        } else if (gmail.connected) {
+            connectionStatus = "Connected. Gmail is scanned only when you tap Sync subscriptions.";
+        } else {
+            connectionStatus = "Connect Gmail to scan for subscriptions when you choose.";
+        }
+        cardContent.addView(Ui.secondary(context, connectionStatus), margin(context, 0, 6, 0, 0));
+        cardContent.addView(Ui.secondary(context,
+                "Scanning is bounded and may not find every subscription."), margin(context, 0, 4, 0, 0));
+
+        String connectLabel = gmail.connected ? "Gmail connected"
+                : gmail.working ? "Preparing Gmail connection…" : "Connect Gmail";
+        MaterialButton connect = Ui.button(context, connectLabel, !gmail.connected);
+        connect.setEnabled(gmail.statusLoaded && gmail.configured && !gmail.connected && !gmail.working);
+        connect.setOnClickListener(view -> actions.onConnectGmail());
+        cardContent.addView(connect, margin(context, 0, 12, 0, 6));
+
+        MaterialButton sync = Ui.button(context,
+                gmail.syncing ? "Syncing subscriptions…" : "Sync subscriptions", false);
+        sync.setEnabled(gmail.statusLoaded && gmail.configured && gmail.connected && !gmail.working);
+        sync.setOnClickListener(view -> actions.onSyncSubscriptions());
+        cardContent.addView(sync);
+
+        MaterialButton refresh = Ui.textButton(context, "Refresh connection status");
+        refresh.setEnabled(!gmail.working);
+        refresh.setOnClickListener(view -> actions.onRefreshGmail());
+        cardContent.addView(refresh, margin(context, 0, 4, 0, 0));
+
+        page.addView(Ui.card(context, cardContent), margin(context, 0, 4, 0, 14));
     }
 
     public static View detail(Context context, Subscription subscription, String monthlyEquivalent,

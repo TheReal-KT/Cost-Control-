@@ -66,6 +66,7 @@ public final class BrandUiTest {
                 @Override public void onOpenReminders() { opened.add("reminders"); }
                 @Override public void onOpenService(Subscription service) { opened.add("service:" + service.getId()); }
                 @Override public void onOpenReminder(Reminder reminder) { opened.add("reminder:" + reminder.getId()); }
+                @Override public void onOpenGmailConnection() { opened.add("gmail"); }
             };
             List<Subscription> services = Arrays.asList(service(1, "Netflix", "199.00"),
                     service(2, "ChatGPT Plus", "399.00"), service(3, "Spotify", "69.99"));
@@ -124,6 +125,33 @@ public final class BrandUiTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             View badge = ServiceBrand.badge(themedContext(1f), "\uD83C\uDFB5 Music lessons", 40);
             assertEquals("\uD83C\uDFB5", ((TextView) ((ViewGroup) badge).getChildAt(0)).getText().toString());
+        });
+    }
+
+    @Test public void servicesExposeGmailSyncAsAnExplicitBoundedAction() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Context context = themedContext(1f);
+            List<String> actions = new ArrayList<>();
+            View services = ServicesScreen.create(context, Collections.emptyList(), "", "All", false,
+                    new ServicesScreen.GmailState(true, true, true, false, false, null),
+                    new ServicesScreen.Actions() {
+                        @Override public void onAdd() { }
+                        @Override public void onOpen(Subscription subscription) { }
+                        @Override public void onSearchChanged(String query) { }
+                        @Override public void onFilterChanged(String filter) { }
+                        @Override public void onLoadMore() { }
+                        @Override public void onConnectGmail() { actions.add("connect"); }
+                        @Override public void onSyncSubscriptions() { actions.add("sync"); }
+                        @Override public void onRefreshGmail() { actions.add("refresh"); }
+                    });
+
+            assertNotNull(findText(services, "Scanning is bounded and may not find every subscription."));
+            View connectedStatus = findText(services, "Gmail connected");
+            assertNotNull(connectedStatus);
+            assertFalse(connectedStatus.isEnabled());
+            assertTrue(actions.isEmpty());
+            findText(services, "Sync subscriptions").performClick();
+            assertEquals(Collections.singletonList("sync"), actions);
         });
     }
 
