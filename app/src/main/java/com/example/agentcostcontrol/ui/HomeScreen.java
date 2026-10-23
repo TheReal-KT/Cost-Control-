@@ -74,7 +74,7 @@ public final class HomeScreen {
                 Ui.dp(context, 16), Ui.dp(context, 14));
         gmailContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
         gmailContent.addView(Ui.secondary(context,
-                "Connect Gmail in Services. Scanning starts only when you tap Sync subscriptions."),
+                "Connect Gmail in Profile. Scanning starts only when you tap Sync subscriptions."),
                 margin(context, 0, 6, 0, 10));
         MaterialButton gmailButton = Ui.button(context, "Set up Gmail connection", false);
         gmailButton.setOnClickListener(view -> actions.onOpenGmailConnection());

@@ -22,7 +22,7 @@ At the 22 October setup checkpoint, Account API and AI chat were configured whil
 2. Add `COMPOSIO_API_KEY` to the existing ignored `backend/.env`; preserve the existing Supabase and model settings. Never add it to Android `local.properties` or source control.
 3. Optionally configure a Composio Gmail auth configuration with Google's `gmail.readonly` scope and set `COMPOSIO_GMAIL_AUTH_CONFIG_ID`. The application's fetch-only tool allowlist is separate from OAuth consent permissions.
 4. Restart the backend so it reads the new configuration. For local Android use, start one emulator and run `pwsh -File scripts/Start-LocalAi.ps1` from the repository root. That script handles the matching TLS certificate, ADB forwarding and application install.
-5. Sign in to Cost Control, open **Services → Connect Gmail**, finish browser consent, return to the app and tap **Sync subscriptions**. Home and Services reload the saved records and existing currency-specific spending calculations.
+5. Sign in to Cost Control, open **Profile → Connections → Connect Gmail**, finish browser consent, return to the app and tap **Sync subscriptions**. Home and Services reload the saved records and existing currency-specific spending calculations.
 
 Live completion requires a real read-only Gmail result and a Composio log ID. Neither a configured key nor a returned connection link alone proves Gmail access. The 22 October checkpoint had no live Composio result because the key was pending.
 

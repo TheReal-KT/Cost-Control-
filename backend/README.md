@@ -10,7 +10,7 @@ From the repository root, prepare the backend while waiting for the Composio pro
 pwsh -File scripts/Initialize-Backend.ps1
 ```
 
-This installs locked dependencies, creates an ignored `.env` template only if absent, appends missing Composio placeholders, and prints configuration status without displaying values. It preserves existing keys and works before Gmail is configured. Add `COMPOSIO_API_KEY` to the local file when the owner supplies it, restart the server, then use **Services → Connect Gmail → Sync subscriptions**. Each user authorizes their own Gmail account in the browser; the owner’s project API key stays on the server. Setup does not create a Composio project or authorize a Gmail account.
+This installs locked dependencies, creates an ignored `.env` template only if absent, appends missing Composio placeholders, and prints configuration status without displaying values. It preserves existing keys and works before Gmail is configured. Add `COMPOSIO_API_KEY` to the local file when the owner supplies it, restart the server, then use **Profile → Connections → Connect Gmail → Sync subscriptions**. Each user authorizes their own Gmail account in the browser; the owner’s project API key stays on the server. Setup does not create a Composio project or authorize a Gmail account.
 
 Install [uv](https://docs.astral.sh/uv/) and Python 3.11 or later. From `backend/`:
 

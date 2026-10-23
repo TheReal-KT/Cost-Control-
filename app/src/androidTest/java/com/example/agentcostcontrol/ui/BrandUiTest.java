@@ -19,6 +19,7 @@ import com.example.agentcostcontrol.model.Reminder;
 import com.example.agentcostcontrol.model.Subscription;
 import com.example.agentcostcontrol.model.SubscriptionImportance;
 import com.example.agentcostcontrol.model.SubscriptionStatus;
+import com.example.agentcostcontrol.model.UserProfile;
 import com.example.agentcostcontrol.preview.SubscriptionPreviewActivity;
 
 import org.junit.Test;
@@ -128,30 +129,44 @@ public final class BrandUiTest {
         });
     }
 
-    @Test public void servicesExposeGmailSyncAsAnExplicitBoundedAction() {
+    @Test public void profileOwnsGmailConnectionAndSyncControls() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             Context context = themedContext(1f);
             List<String> actions = new ArrayList<>();
+            UserProfile profile = new UserProfile(1, "auth-user", "A", "User", "user@example.com",
+                    "personal", OffsetDateTime.now(), OffsetDateTime.now());
+            ProfileScreen.Actions profileActions = new ProfileScreen.Actions() {
+                @Override public void onAddBudget() { }
+                @Override public void onEditBudget(com.example.agentcostcontrol.model.Budget budget) { }
+                @Override public void onLoadMoreBudgets() { }
+                @Override public void onConnectGmail() { actions.add("connect"); }
+                @Override public void onSyncSubscriptions() { actions.add("sync"); }
+                @Override public void onRefreshGmail() { actions.add("refresh"); }
+                @Override public void onSignOut() { }
+            };
+            View disconnectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
+                    new ProfileScreen.GmailState(true, true, false, false, false, null), profileActions);
+            assertNotNull(findText(disconnectedProfile, "Connections"));
+            findText(disconnectedProfile, "Connect Gmail").performClick();
+            assertEquals(Collections.singletonList("connect"), actions);
+
+            View connectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
+                    new ProfileScreen.GmailState(true, true, true, false, false, null), profileActions);
+            View connectedStatus = findText(connectedProfile, "Gmail connected");
+            assertNotNull(connectedStatus);
+            assertFalse(connectedStatus.isEnabled());
+            findText(connectedProfile, "Sync subscriptions").performClick();
+            assertEquals(Arrays.asList("connect", "sync"), actions);
+
             View services = ServicesScreen.create(context, Collections.emptyList(), "", "All", false,
-                    new ServicesScreen.GmailState(true, true, true, false, false, null),
                     new ServicesScreen.Actions() {
                         @Override public void onAdd() { }
                         @Override public void onOpen(Subscription subscription) { }
                         @Override public void onSearchChanged(String query) { }
                         @Override public void onFilterChanged(String filter) { }
                         @Override public void onLoadMore() { }
-                        @Override public void onConnectGmail() { actions.add("connect"); }
-                        @Override public void onSyncSubscriptions() { actions.add("sync"); }
-                        @Override public void onRefreshGmail() { actions.add("refresh"); }
                     });
-
-            assertNotNull(findText(services, "Scanning is bounded and may not find every subscription."));
-            View connectedStatus = findText(services, "Gmail connected");
-            assertNotNull(connectedStatus);
-            assertFalse(connectedStatus.isEnabled());
-            assertTrue(actions.isEmpty());
-            findText(services, "Sync subscriptions").performClick();
-            assertEquals(Collections.singletonList("sync"), actions);
+            assertNull(findText(services, "Find subscriptions from Gmail"));
         });
     }
 

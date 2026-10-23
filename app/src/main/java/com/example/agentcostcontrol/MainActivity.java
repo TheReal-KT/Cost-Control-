@@ -303,7 +303,7 @@ public class MainActivity extends AppCompatActivity {
         if (subscriptionsRefreshPending && routes.isEmpty()) {
             subscriptionsRefreshPending = false;
             renderCurrentRoute();
-        } else if (rootScreen == RootScreen.SERVICES && routes.isEmpty()) {
+        } else if (rootScreen == RootScreen.PROFILE && routes.isEmpty()) {
             refreshGmailStatus();
         }
     }
@@ -948,7 +948,7 @@ public class MainActivity extends AppCompatActivity {
                     uncertainListChecked = true;
                 }
                 renderPage(result);
-                if (requestedRoot == RootScreen.SERVICES && routes.isEmpty()) refreshGmailStatus();
+                if (requestedRoot == RootScreen.PROFILE && routes.isEmpty()) refreshGmailStatus();
             });
         });
     }
@@ -1035,7 +1035,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshGmailStatus() {
-        if (!activityResumed || session == null || authMode != null || rootScreen != RootScreen.SERVICES
+        if (!activityResumed || session == null || authMode != null || rootScreen != RootScreen.PROFILE
                 || !routes.isEmpty() || gmailStatusRequestInFlight || gmailActionInFlight) return;
         gmailStatusRequestInFlight = true;
         int request = ++gmailStatusGeneration;
@@ -1069,7 +1069,7 @@ public class MainActivity extends AppCompatActivity {
                     gmailConnected = resultConnection.isConnected();
                     gmailStatusError = null;
                 }
-                if (isCurrentServiceView(navigation, authUserId)) renderServiceIntegrationState();
+                if (isCurrentGmailView(navigation, authUserId)) renderGmailIntegrationState();
             });
         });
     }
@@ -1080,7 +1080,7 @@ public class MainActivity extends AppCompatActivity {
         gmailSyncing = false;
         int operation = ++gmailOperationGeneration;
         String authUserId = session.getAuthUserId();
-        renderServiceIntegrationState();
+        renderGmailIntegrationState();
         int navigation = navigationGeneration;
         dataWorker.execute(() -> {
             String redirectUrl = null;
@@ -1099,8 +1099,8 @@ public class MainActivity extends AppCompatActivity {
                     requireSignInAfterIntegrationFailure(resultFailure);
                     return;
                 }
-                if (!isCurrentServiceView(navigation, authUserId)) return;
-                renderServiceIntegrationState();
+                if (!isCurrentGmailView(navigation, authUserId)) return;
+                renderGmailIntegrationState();
                 if (resultFailure != null) {
                     showSnackbar(resultFailure.getUserMessage());
                     return;
@@ -1124,7 +1124,7 @@ public class MainActivity extends AppCompatActivity {
         }
         gmailActionInFlight = true;
         gmailSyncing = true;
-        renderServiceIntegrationState();
+        renderGmailIntegrationState();
     }
 
     private void onGmailSyncChanged(AccountDataViewModel.GmailSyncState syncState) {
@@ -1134,7 +1134,7 @@ public class MainActivity extends AppCompatActivity {
         if (syncState.isInProgress()) {
             gmailActionInFlight = true;
             gmailSyncing = true;
-            renderServiceIntegrationState();
+            renderGmailIntegrationState();
             return;
         }
 
@@ -1157,8 +1157,8 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     subscriptionsRefreshPending = true;
                 }
-            } else if (rootScreen == RootScreen.SERVICES && routes.isEmpty()) {
-                renderServiceIntegrationState();
+            } else if (rootScreen == RootScreen.PROFILE && routes.isEmpty()) {
+                renderGmailIntegrationState();
                 showSnackbar(failure.getUserMessage());
             }
             accountDataViewModel.acknowledgeGmailSync(syncState.getGeneration());
@@ -1185,15 +1185,15 @@ public class MainActivity extends AppCompatActivity {
         return message;
     }
 
-    private void renderServiceIntegrationState() {
-        if (rootScreen != RootScreen.SERVICES || !routes.isEmpty() || session == null) return;
+    private void renderGmailIntegrationState() {
+        if (rootScreen != RootScreen.PROFILE || !routes.isEmpty() || session == null) return;
         saveCurrentScrollPosition();
         renderPage(currentData);
     }
 
-    private boolean isCurrentServiceView(int navigation, String authUserId) {
+    private boolean isCurrentGmailView(int navigation, String authUserId) {
         return activityResumed && sameView(navigation, authUserId)
-                && rootScreen == RootScreen.SERVICES && routes.isEmpty();
+                && rootScreen == RootScreen.PROFILE && routes.isEmpty();
     }
 
     private boolean isCurrentAccount(String authUserId) {
@@ -1372,22 +1372,17 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onOpenReminders() { requestRoot(RootScreen.REMINDERS); }
                             @Override public void onOpenService(Subscription subscription) { openServiceDetail(subscription); }
                             @Override public void onOpenReminder(Reminder reminder) { openReminderDetail(reminder); }
-                            @Override public void onOpenGmailConnection() { requestRoot(RootScreen.SERVICES); }
+                            @Override public void onOpenGmailConnection() { requestRoot(RootScreen.PROFILE); }
                         });
             case SERVICES:
                 return ServicesScreen.create(this, data.subscriptions, serviceQuery, serviceFilter,
-                        data.hasMoreSubscriptions, new ServicesScreen.GmailState(gmailStatusLoaded,
-                                gmailConfigured, gmailConnected, gmailActionInFlight, gmailSyncing,
-                                gmailStatusError),
+                        data.hasMoreSubscriptions,
                         new ServicesScreen.Actions() {
                             @Override public void onAdd() { openSubscriptionForm(null); }
                             @Override public void onOpen(Subscription subscription) { openServiceDetail(subscription); }
                             @Override public void onSearchChanged(String query) { serviceQuery = query; }
                             @Override public void onFilterChanged(String filter) { serviceFilter = filter; }
                             @Override public void onLoadMore() { loadMore(RootScreen.SERVICES); }
-                            @Override public void onConnectGmail() { connectGmail(); }
-                            @Override public void onSyncSubscriptions() { syncSubscriptionsFromGmail(); }
-                            @Override public void onRefreshGmail() { refreshGmailStatus(); }
                         });
             case REMINDERS:
                 return RemindersScreen.list(this, data.reminders, data.subscriptions, reminderFilter,
@@ -1409,10 +1404,15 @@ public class MainActivity extends AppCompatActivity {
                     return null;
                 }
                 return ProfileScreen.create(this, rootProfile, data.budgets, data.hasMoreBudgets,
+                        new ProfileScreen.GmailState(gmailStatusLoaded, gmailConfigured, gmailConnected,
+                                gmailActionInFlight, gmailSyncing, gmailStatusError),
                         new ProfileScreen.Actions() {
                     @Override public void onAddBudget() { openBudgetForm(null); }
                     @Override public void onEditBudget(Budget budget) { openBudgetForm(budget); }
                     @Override public void onLoadMoreBudgets() { loadMore(RootScreen.PROFILE); }
+                    @Override public void onConnectGmail() { connectGmail(); }
+                    @Override public void onSyncSubscriptions() { syncSubscriptionsFromGmail(); }
+                    @Override public void onRefreshGmail() { refreshGmailStatus(); }
                     @Override public void onSignOut() { confirmSignOut(); }
                 });
             default:
