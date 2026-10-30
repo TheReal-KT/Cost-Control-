@@ -130,7 +130,7 @@ public final class ProfileScreen {
         }
         cardContent.addView(Ui.secondary(context, connectionStatus), margin(context, 0, 6, 0, 0));
         cardContent.addView(Ui.secondary(context,
-                "We scan up to 50 matching messages at a time and may miss some subscriptions."),
+                "We scan up to 100 matching messages (two pages) and may miss some subscriptions."),
                 margin(context, 0, 4, 0, 0));
 
         String connectLabel = gmail.connected ? "Gmail connected"
