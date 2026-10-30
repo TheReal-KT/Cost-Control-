@@ -43,7 +43,12 @@ jobs:
           distribution: temurin
           java-version: '25'
       - name: Install Android SDK components
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          "$SDKMANAGER" 'platforms;android-37' 'build-tools;37.0.0'
       - uses: gradle/actions/setup-gradle@v4
       - name: Verify Android source and JVM tests
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon
