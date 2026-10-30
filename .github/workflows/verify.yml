@@ -1,0 +1,59 @@
+name: Verify Android and Gmail backend
+
+on:
+  push:
+    branches:
+      - audit/gmail-subscription-ci-20261030
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests and lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Verify backend contracts
+        run: uv run --locked python -B -m unittest discover -s tests -v
+      - name: Ruff lint
+        run: uv run --locked ruff check src tests main.py
+      - name: Ruff format
+        run: uv run --locked ruff format --check src tests main.py
+
+  android:
+    name: Android debug build, JVM tests and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          "$SDKMANAGER" --channel=3 'platforms;android-37.0' 'build-tools;37.0.0'
+          # API 37.0 is installed under a minor-version folder; AGP may resolve
+          # compileSdk 37 via the unsuffixed platform hash.
+          if [ -d "$SDK_ROOT/platforms/android-37.0" ] && [ ! -e "$SDK_ROOT/platforms/android-37" ]; then
+            ln -s android-37.0 "$SDK_ROOT/platforms/android-37"
+          fi
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify Android source and JVM tests
+        run: bash ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon

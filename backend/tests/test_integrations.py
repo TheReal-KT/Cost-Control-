@@ -103,7 +103,7 @@ class FakeComposioSession:
         self.client.executions.append((self.owner, tool_slug, arguments))
         return SimpleNamespace(
             result_type=self.client.result_type,
-            data=self.client.result_data,
+            data=self.client.pages.get(arguments.get("page_token"), self.client.result_data),
             log_id=self.client.log_id,
             error=self.client.error,
         )
@@ -118,6 +118,7 @@ class FakeComposio:
         self.redirect_url = "https://connect.composio.dev/link/synthetic"
         self.messages = [receipt_message()]
         self.has_more = False
+        self.pages = {}
         self.result_type = "completed"
         self.result_data = None
         self.error = "PRIVATE_PROVIDER_ERROR"
@@ -296,6 +297,68 @@ class IntegrationContracts(unittest.TestCase):
         self.assertEqual(50, arguments["max_results"])
         self.assertTrue(arguments["include_payload"])
 
+    def test_second_gmail_page_imports_another_service_and_preserves_idempotency(self):
+        second = receipt_message("gmail-message-2")
+        second["sender"] = "Spotify <billing@mailer.spotify.com>"
+        self.composio.pages = {
+            None: {
+                "successful": True,
+                "data": {"messages": [receipt_message()], "nextPageToken": "page-two"},
+            },
+            "page-two": {
+                "successful": True,
+                "data": {"messages": [second], "nextPageToken": ""},
+            },
+        }
+
+        first = self.client.post("/integrations/subscriptions/sync", headers=self.headers())
+        self.assertEqual(200, first.status_code)
+        self.assertEqual(2, first.json()["scanned"])
+        self.assertEqual(2, first.json()["imported"])
+        self.assertEqual(0, first.json()["skipped"])
+        self.assertFalse(first.json()["has_more"])
+        self.assertEqual(2, len(self.composio.executions))
+        self.assertNotIn("page_token", self.composio.executions[0][2])
+        self.assertEqual("page-two", self.composio.executions[1][2]["page_token"])
+        self.assertEqual(2, len(json.loads(self.upstreams.rpc_requests[0].content)["receipts"]))
+
+        repeated = self.client.post("/integrations/subscriptions/sync", headers=self.headers())
+        self.assertEqual(0, repeated.json()["imported"])
+        self.assertEqual(2, repeated.json()["skipped"])
+
+    def test_gmail_scan_reports_remaining_pages_after_a_bounded_second_page(self):
+        self.composio.pages = {
+            None: {
+                "successful": True,
+                "data": {"messages": [receipt_message()], "nextPageToken": "page-two"},
+            },
+            "page-two": {
+                "successful": True,
+                "data": {"messages": [{"id": "not-a-receipt"}], "nextPageToken": "page-three"},
+            },
+        }
+        response = self.client.post("/integrations/subscriptions/sync", headers=self.headers())
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, response.json()["scanned"])
+        self.assertEqual(1, response.json()["imported"])
+        self.assertTrue(response.json()["has_more"])
+        self.assertEqual(2, len(self.composio.executions))
+
+    def test_failed_second_gmail_page_does_not_import_the_first_page(self):
+        self.composio.pages = {
+            None: {
+                "successful": True,
+                "data": {"messages": [receipt_message()], "nextPageToken": "page-two"},
+            },
+            "page-two": {
+                "successful": False,
+                "data": {"messages": [], "nextPageToken": ""},
+            },
+        }
+        response = self.client.post("/integrations/subscriptions/sync", headers=self.headers())
+        self.assertEqual(502, response.status_code)
+        self.assertEqual([], self.upstreams.rpc_requests)
+
     def test_second_account_uses_its_own_composio_and_supabase_identity(self):
         response_a = self.client.post("/integrations/subscriptions/sync", headers=self.headers("a"))
         response_b = self.client.post("/integrations/subscriptions/sync", headers=self.headers("b"))
@@ -312,8 +375,8 @@ class IntegrationContracts(unittest.TestCase):
         self.composio.has_more = True
         response = self.client.post("/integrations/subscriptions/sync", headers=self.headers())
         self.assertEqual(0, response.json()["imported"])
-        self.assertEqual(1, response.json()["skipped"])
-        self.assertEqual(1, response.json()["scanned"])
+        self.assertEqual(2, response.json()["skipped"])
+        self.assertEqual(2, response.json()["scanned"])
         self.assert_no_store(response)
         self.assertTrue(response.json()["has_more"])
         self.assertIn("More matching emails remain", response.json()["message"])

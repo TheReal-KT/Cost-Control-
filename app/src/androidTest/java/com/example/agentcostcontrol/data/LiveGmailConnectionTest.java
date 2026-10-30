@@ -77,7 +77,7 @@ public final class LiveGmailConnectionTest {
         assertEquals("Sync must remain bound to the signed-in account",
                 session.getAuthUserId(), currentSession.getAuthUserId());
         int ownedSubscriptionsLoaded = repository.listSubscriptions(100, 0).size();
-        assertTrue("The Gmail scan must remain bounded to 50 messages", sync.getScanned() <= 50);
+        assertTrue("The Gmail scan must remain bounded to 100 messages", sync.getScanned() <= 100);
         assertEquals("Every scanned message must be imported or skipped", sync.getScanned(),
                 sync.getImported() + sync.getSkipped());
 

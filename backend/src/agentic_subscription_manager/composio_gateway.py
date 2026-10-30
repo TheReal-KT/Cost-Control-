@@ -16,6 +16,7 @@ from .adapters import RemoteFailure
 logger = logging.getLogger("agentcostcontrol.integrations")
 
 MAX_EMAILS_PER_SYNC = 50
+MAX_PAGES_PER_SYNC = 2
 MAX_TOOL_RESPONSE_BYTES = 1_000_000
 TOOLKIT = "gmail"
 FETCH_TOOL = "GMAIL_FETCH_EMAILS"
@@ -73,7 +74,7 @@ def _response_mapping(value: object) -> dict:
     return plain
 
 
-def _email_page(value: object) -> tuple[list[dict], bool]:
+def _email_page(value: object) -> tuple[list[dict], str | None]:
     response = _response_mapping(value)
     for _ in range(5):
         if "messages" in response:
@@ -85,7 +86,7 @@ def _email_page(value: object) -> tuple[list[dict], bool]:
                 raise ValueError("Composio returned an invalid email")
             if token is not None and not isinstance(token, str):
                 raise ValueError("Composio returned an invalid page token")
-            return messages, bool(token)
+            return messages, token or None
         nested = response.get("data")
         if isinstance(nested, dict):
             response = nested
@@ -228,9 +229,11 @@ class ComposioGmail:
             if not self._connected(session, cancelled, deadline):
                 raise RemoteFailure(409, "Connect Gmail before syncing subscriptions")
             self._check_active(cancelled, deadline)
-            result = session.execute(
-                FETCH_TOOL,
-                arguments={
+            messages: list[dict] = []
+            next_token: str | None = None
+            for _ in range(MAX_PAGES_PER_SYNC):
+                self._check_active(cancelled, deadline)
+                arguments: dict[str, object] = {
                     "query": (
                         "newer_than:90d {subscription renewal recurring membership receipt invoice "
                         "billing payment}"
@@ -238,27 +241,33 @@ class ComposioGmail:
                     "max_results": MAX_EMAILS_PER_SYNC,
                     "include_payload": True,
                     "include_spam_trash": False,
-                },
-            )
-            result_type = _value(result, "result_type")
-            log_id = _value(result, "log_id")
-            safe_log_id = (
-                log_id
-                if isinstance(log_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", log_id)
-                else "unknown"
-            )
-            data = _value(result, "data")
-            tool_success = _value(data, "successful")
-            if (
-                result_type != "completed"
-                or (tool_success is not None and not isinstance(tool_success, bool))
-                or tool_success is False
-            ):
-                logger.warning("gmail tool_failure log_id=%s", safe_log_id)
-                raise RemoteFailure(502, "Gmail email search failed")
-            logger.info("gmail tool_success log_id=%s", safe_log_id)
-            self._check_active(cancelled, deadline)
-            return _email_page(data)
+                }
+                if next_token:
+                    arguments["page_token"] = next_token
+                result = session.execute(FETCH_TOOL, arguments=arguments)
+                result_type = _value(result, "result_type")
+                log_id = _value(result, "log_id")
+                safe_log_id = (
+                    log_id
+                    if isinstance(log_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", log_id)
+                    else "unknown"
+                )
+                data = _value(result, "data")
+                tool_success = _value(data, "successful")
+                if (
+                    result_type != "completed"
+                    or (tool_success is not None and not isinstance(tool_success, bool))
+                    or tool_success is False
+                ):
+                    logger.warning("gmail tool_failure log_id=%s", safe_log_id)
+                    raise RemoteFailure(502, "Gmail email search failed")
+                logger.info("gmail tool_success log_id=%s", safe_log_id)
+                self._check_active(cancelled, deadline)
+                page, next_token = _email_page(data)
+                messages.extend(page)
+                if not next_token or not page:
+                    break
+            return messages, bool(next_token)
         finally:
             self._delete_session(session, "message_search")
 
