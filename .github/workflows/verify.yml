@@ -48,7 +48,12 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
           test -n "$SDKMANAGER"
-          "$SDKMANAGER" 'platforms;android-37' 'build-tools;37.0.0'
+          "$SDKMANAGER" --channel=3 'platforms;android-37.0' 'build-tools;37.0.0'
+          # API 37.0 is installed under a minor-version folder; AGP may resolve
+          # compileSdk 37 via the unsuffixed platform hash.
+          if [ -d "$SDK_ROOT/platforms/android-37.0" ] && [ ! -e "$SDK_ROOT/platforms/android-37" ]; then
+            ln -s android-37.0 "$SDK_ROOT/platforms/android-37"
+          fi
       - uses: gradle/actions/setup-gradle@v4
       - name: Verify Android source and JVM tests
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon
