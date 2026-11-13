@@ -520,16 +520,70 @@ class CancelledIntegration(unittest.IsolatedAsyncioTestCase):
             sessions=SimpleNamespace(create=lambda **options: BlockingSession())
         )
         gateway = ComposioGmail(lambda: client)
-        request = asyncio.create_task(gateway.fetch_recent_messages(OWNER_A))
+        budget = IntegrationBudget()
+
+        async def bounded_request():
+            async with budget.admit(OWNER_A):
+                await gateway.fetch_recent_messages(OWNER_A)
+
+        request = asyncio.create_task(bounded_request())
         self.assertTrue(await asyncio.wait_for(asyncio.to_thread(entered.wait), 2))
         request.cancel()
-        await asyncio.sleep(0)
-        self.assertFalse(request.done())
-        release.set()
+        try:
+            await asyncio.sleep(0)
+            self.assertFalse(request.done())
+            # A request-level timeout can cancel again while the SDK call is stopping.
+            request.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(request.done())
+            self.assertEqual(1, budget.in_flight)
+        finally:
+            release.set()
         with self.assertRaises(asyncio.CancelledError):
             await request
         self.assertTrue(completed.is_set())
         self.assertTrue(deleted.is_set())
+        self.assertEqual(0, budget.in_flight)
+
+    async def test_status_deadline_waits_for_timed_out_sdk_session_cleanup(self):
+        entered = threading.Event()
+        release = threading.Event()
+        deleted = threading.Event()
+
+        def create_session(**options):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("Synthetic SDK request did not finish")
+            return SimpleNamespace(delete=deleted.set)
+
+        upstreams = IntegrationUpstreams()
+        client = SimpleNamespace(sessions=SimpleNamespace(create=create_session))
+        app = create_app(BASE_SETTINGS, httpx.MockTransport(upstreams.handle), lambda: client)
+
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="https://local.invalid"
+            ) as http_client:
+                with (
+                    patch("agentic_subscription_manager.composio_gateway.STATUS_TIMEOUT", 0.15),
+                    patch("agentic_subscription_manager.api.INTEGRATION_STATUS_DEADLINE", 0.3),
+                ):
+                    request = asyncio.create_task(
+                        http_client.get(
+                            "/integrations/gmail", headers={"Authorization": "Bearer user-a"}
+                        )
+                    )
+                    try:
+                        self.assertTrue(await asyncio.wait_for(asyncio.to_thread(entered.wait), 2))
+                        await asyncio.sleep(0.5)
+                        self.assertFalse(request.done())
+                        self.assertEqual(1, app.state.integration_budget.in_flight)
+                    finally:
+                        release.set()
+                    response = await asyncio.wait_for(request, 2)
+                    self.assertEqual(504, response.status_code)
+                    self.assertTrue(deleted.is_set())
+                    self.assertEqual(0, app.state.integration_budget.in_flight)
 
 
 class IntegrationAdmission(unittest.IsolatedAsyncioTestCase):

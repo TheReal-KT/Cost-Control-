@@ -326,10 +326,20 @@ class ComposioGmail:
     @staticmethod
     async def _join_worker(worker: asyncio.Task[Any]) -> None:
         """Wait for a bounded SDK request to stop before releasing this operation."""
-        try:
-            await asyncio.shield(worker)
-        except (Exception, asyncio.CancelledError):
-            return
+        interrupted = False
+        while True:
+            try:
+                await asyncio.shield(worker)
+                break
+            except asyncio.CancelledError:
+                if worker.cancelled():
+                    raise
+                # An outer deadline may cancel again while the SDK call is stopping.
+                interrupted = True
+            except Exception:
+                break  # The request is already ending due to timeout or cancellation.
+        if interrupted:
+            raise asyncio.CancelledError
 
     async def is_connected(self, owner: UUID) -> bool:
         return await self._run(
