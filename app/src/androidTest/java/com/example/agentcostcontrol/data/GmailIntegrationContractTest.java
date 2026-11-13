@@ -59,6 +59,31 @@ public final class GmailIntegrationContractTest {
     }
 
     @Test
+    public void disconnectUsesAuthenticatedDeleteAndDoesNotReplayAfterUnauthorized() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.add(200, "{\"connected\":false}");
+        assertFalse(repository(transport).disconnectGmail());
+        Request request = transport.requests.get(0);
+        assertEquals("DELETE", request.method);
+        assertEquals("https://backend.example.invalid/tenant/integrations/gmail", request.url);
+        assertEquals("Bearer synthetic-access-token", request.headers.get("Authorization"));
+        assertFalse(request.headers.containsKey("apikey"));
+
+        FakeTransport rejected = new FakeTransport();
+        rejected.add(401, "{}");
+        rejected.add(200, REFRESHED_SESSION);
+        try {
+            repository(rejected).disconnectGmail();
+            fail("A rejected delete must not be repeated automatically");
+        } catch (ApiException error) {
+            assertEquals(ApiException.Category.RETRY_REQUIRED, error.getCategory());
+        }
+        assertEquals(2, rejected.requests.size());
+        assertEquals("DELETE", rejected.requests.get(0).method);
+        assertEquals("POST", rejected.requests.get(1).method);
+    }
+
+    @Test
     public void connectAndSyncAreExplicitAuthenticatedPosts() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.add(200, "{\"redirect_url\":\"https://connect.example.invalid/start?token=abc\"}");

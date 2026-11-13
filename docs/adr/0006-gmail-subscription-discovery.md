@@ -1,6 +1,6 @@
 # 0006: User-scoped Gmail subscription discovery
 
-Date: 22 October 2026
+Date: 22 October 2026; updated 13 November 2026
 
 ## Context
 
@@ -12,7 +12,7 @@ Email is incomplete and untrusted evidence. A receipt can describe a one-off pur
 
 Keep Android rendering and account data in their existing layers. Add explicit Gmail connect and sync controls. Send the current Supabase session token to the Python backend. The backend verifies identity with Supabase and uses that Auth UUID for the Composio session. Composio credentials stay on the server; Composio manages the browser authorization link.
 
-Use a bounded, read-only Gmail scan (at most two 50-message pages per sync) and conservative extraction of explicit recurring billing evidence. Sync is a deliberate user action. The chat model does not receive a general Gmail tool executor or permission to change provider accounts. Discovered records enter the existing subscription table, so the current Home and Services calculations remain authoritative.
+Use a bounded, read-only Gmail scan (at most 100 messages in small pages per sync) and conservative extraction of explicit recurring billing evidence. Sync is a deliberate user action. A direct chat instruction can request a search and import for one named service; the backend recognizes a limited set of unambiguous phrasings and only imports a matching receipt. This is a narrow exception to the original read-only chat decision: the user's direct request authorizes this one import, and uncertain requests do not trigger it. The chat model does not receive email content, a general Gmail tool executor or permission to change provider accounts. Discovered records enter the existing subscription table, so the current Home and Services calculations remain authoritative.
 
 Persist through the security-invoker `import_subscription_receipts(receipts jsonb)` database function. Security invoker means it runs with the caller's permissions, so normal row ownership checks still apply. The function derives the profile from `auth.uid()`; callers cannot supply another owner's ID. Validate at most 100 receipts and save the batch in one transaction. A per-owner transaction lock serializes concurrent imports.
 
@@ -27,7 +27,7 @@ Retain an owner-scoped receipt ID ledger without email bodies or credentials. Re
 
 ## Consequences / trade-offs
 
-The first implementation prioritizes avoiding false financial records. Supported receipt formats are deliberately narrow; users can add or correct services manually. The scan is bounded to 100 matching emails over two pages and does not guarantee mailbox completeness. Additional pages require a future cursor/checkpoint-based scan design, rather than re-reading the first pages on every sync. Existing service price changes are not applied automatically. Service names that differ materially can still require manual reconciliation.
+The first implementation prioritizes avoiding false financial records. Supported receipt formats are deliberately narrow; users can add or correct services manually. The scan is bounded to 100 matching emails and does not guarantee mailbox completeness. Additional pages require a future cursor/checkpoint-based scan design, rather than re-reading the first pages on every sync. Existing service price changes are not applied automatically. Service names that differ materially can still require manual reconciliation. The chat request recognizer deliberately supports only specific direct phrasings and exact service-name matches; other requests fall back to ordinary chat and cannot write records.
 
 The connection and scan require configured server credentials and individual Gmail consent. Mocked API tests establish application behaviour but cannot establish live Composio/provider access. A live read-only Gmail result and Composio log ID are required before claiming that integration verified.
 

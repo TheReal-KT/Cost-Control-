@@ -92,7 +92,10 @@ class OpenRouterExplanation:
                         "For account facts, use only that evidence. Empty lists mean no saved "
                         "records; never invent services or budgets. If service_list_truncated is "
                         "true, say service details are limited to the first 50 records; totals "
-                        "include all loaded records. Gmail and saved chat context are unavailable. "
+                        "include all loaded records. Saved chat context is unavailable. "
+                        "This model cannot access Gmail or change records. The app can process a "
+                        "direct request such as 'look in my Gmail for my Netflix subscription "
+                        "and add it as a service'. "
                         "Other lists also carry counts and truncation flags; never imply a "
                         "truncated list is complete. "
                         "Currencies are separate totals, never conversions; do not combine them. "
@@ -111,7 +114,7 @@ class OpenRouterExplanation:
             # Reasoning shares this budget; leave room for the short, visible explanation.
             "reasoning": {"enabled": False},
             "provider": {"allow_fallbacks": False},
-            # There is no account-action executor. Do not let a model choose any tools.
+            # Gmail imports use a separate constrained path, never model-selected tools.
             "tool_choice": "none",
         }
 

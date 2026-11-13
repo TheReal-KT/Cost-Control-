@@ -3,6 +3,7 @@ package com.example.agentcostcontrol.ui;
 import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import com.example.agentcostcontrol.R;
@@ -40,6 +41,7 @@ public final class ProfileScreen {
         void onEditBudget(Budget budget);
         void onLoadMoreBudgets();
         void onConnectGmail();
+        void onDisconnectGmail();
         void onSyncSubscriptions();
         void onRefreshGmail();
         void onSignOut();
@@ -114,45 +116,54 @@ public final class ProfileScreen {
         LinearLayout cardContent = Ui.column(context);
         cardContent.setPadding(Ui.dp(context, 16), Ui.dp(context, 14),
                 Ui.dp(context, 16), Ui.dp(context, 14));
-        cardContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
-
+        LinearLayout heading = Ui.row(context);
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(R.drawable.ic_brand_gmail);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        heading.addView(icon, new LinearLayout.LayoutParams(Ui.dp(context, 28), Ui.dp(context, 28)));
+        LinearLayout title = Ui.column(context);
+        title.addView(Ui.text(context, "Gmail", 16, Ui.color(context, R.color.text_primary), true));
         String connectionStatus;
         if (gmail.statusError != null && !gmail.statusError.trim().isEmpty()) {
             connectionStatus = gmail.statusError;
         } else if (!gmail.statusLoaded) {
-            connectionStatus = "Checking your Gmail connection…";
+            connectionStatus = "Checking connection…";
         } else if (!gmail.configured) {
-            connectionStatus = "Gmail discovery is not configured on this server yet.";
+            connectionStatus = "Not configured";
         } else if (gmail.connected) {
-            connectionStatus = "Connected. Gmail is scanned only when you tap Sync subscriptions.";
+            connectionStatus = "Connected";
         } else {
-            connectionStatus = "Connect Gmail to find subscriptions in recent email.";
+            connectionStatus = "Not connected";
         }
-        cardContent.addView(Ui.secondary(context, connectionStatus), margin(context, 0, 6, 0, 0));
-        cardContent.addView(Ui.secondary(context,
-                "We scan up to 100 matching messages (two pages) and may miss some subscriptions."),
-                margin(context, 0, 4, 0, 0));
+        title.addView(Ui.secondary(context, connectionStatus));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        titleParams.setMarginStart(Ui.dp(context, 12));
+        heading.addView(title, titleParams);
+        cardContent.addView(heading);
 
-        String connectLabel = gmail.connected ? "Gmail connected"
-                : gmail.working ? "Preparing Gmail connection…"
-                : gmail.statusError != null ? "Try connecting Gmail" : "Connect Gmail";
+        LinearLayout buttons = Ui.row(context);
+        boolean retryStatus = !gmail.statusLoaded && gmail.statusError != null;
+        String connectLabel = retryStatus ? "Retry" : gmail.connected ? "Disconnect" : "Connect";
         MaterialButton connect = Ui.button(context, connectLabel, !gmail.connected);
-        boolean canConnect = (gmail.statusLoaded && gmail.configured && !gmail.connected)
-                || gmail.statusError != null;
-        connect.setEnabled(canConnect && !gmail.connected && !gmail.working);
-        connect.setOnClickListener(view -> actions.onConnectGmail());
-        cardContent.addView(connect, margin(context, 0, 12, 0, 6));
+        connect.setContentDescription(connectLabel + " Gmail");
+        connect.setEnabled((retryStatus || (gmail.statusLoaded && gmail.configured)) && !gmail.working);
+        connect.setOnClickListener(view -> {
+            if (retryStatus) actions.onRefreshGmail();
+            else if (gmail.connected) actions.onDisconnectGmail();
+            else actions.onConnectGmail();
+        });
+        buttons.addView(connect, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        MaterialButton sync = Ui.button(context,
-                gmail.syncing ? "Syncing subscriptions…" : "Sync subscriptions", false);
+        MaterialButton sync = Ui.button(context, gmail.syncing ? "Syncing…" : "Sync", false);
+        sync.setContentDescription("Sync Gmail subscriptions");
         sync.setEnabled(gmail.statusLoaded && gmail.configured && gmail.connected && !gmail.working);
         sync.setOnClickListener(view -> actions.onSyncSubscriptions());
-        cardContent.addView(sync);
-
-        MaterialButton refresh = Ui.textButton(context, "Refresh connection status");
-        refresh.setEnabled(!gmail.working);
-        refresh.setOnClickListener(view -> actions.onRefreshGmail());
-        cardContent.addView(refresh, margin(context, 0, 4, 0, 0));
+        LinearLayout.LayoutParams syncParams = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        syncParams.setMarginStart(Ui.dp(context, 8));
+        buttons.addView(sync, syncParams);
+        cardContent.addView(buttons, margin(context, 0, 12, 0, 0));
 
         page.addView(Ui.card(context, cardContent), margin(context, 0, 0, 0, 20));
     }

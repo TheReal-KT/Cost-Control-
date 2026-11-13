@@ -1126,6 +1126,50 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void confirmDisconnectGmail() {
+        if (!gmailStatusLoaded || !gmailConnected || gmailActionInFlight || session == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Disconnect Gmail?")
+                .setMessage("You can reconnect later. Your saved services will stay.")
+                .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
+                .setPositiveButton("Disconnect", (dialog, which) -> disconnectGmail())
+                .show();
+    }
+
+    private void disconnectGmail() {
+        if (!gmailStatusLoaded || !gmailConnected || gmailActionInFlight || session == null) return;
+        gmailActionInFlight = true;
+        int operation = ++gmailOperationGeneration;
+        String authUserId = session.getAuthUserId();
+        int navigation = navigationGeneration;
+        renderGmailIntegrationState();
+        dataWorker.execute(() -> {
+            ApiException failure = null;
+            try { repository.disconnectGmail(); }
+            catch (ApiException error) { failure = error; }
+            ApiException resultFailure = failure;
+            Session resultSession = repository.getCurrentSession();
+            mainHandler.post(() -> {
+                if (operation != gmailOperationGeneration) return;
+                gmailActionInFlight = false;
+                if (!isCurrentAccount(authUserId)) return;
+                syncSessionSnapshot(resultSession, authUserId);
+                if (resultFailure != null && resultFailure.getCategory() == ApiException.Category.AUTH_REQUIRED) {
+                    requireSignInAfterIntegrationFailure(resultFailure);
+                    return;
+                }
+                // The provider may have completed a request even when its response was lost.
+                gmailStatusLoaded = false;
+                gmailStatusError = null;
+                if (isCurrentGmailView(navigation, authUserId)) {
+                    renderGmailIntegrationState();
+                    if (resultFailure != null) showSnackbar("Could not confirm disconnection. Checking Gmail status.");
+                    refreshGmailStatus();
+                }
+            });
+        });
+    }
+
     private void syncSubscriptionsFromGmail() {
         if (!gmailStatusLoaded || !gmailConfigured || !gmailConnected
                 || gmailActionInFlight || session == null) return;
@@ -1423,6 +1467,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override public void onEditBudget(Budget budget) { openBudgetForm(budget); }
                     @Override public void onLoadMoreBudgets() { loadMore(RootScreen.PROFILE); }
                     @Override public void onConnectGmail() { connectGmail(); }
+                    @Override public void onDisconnectGmail() { confirmDisconnectGmail(); }
                     @Override public void onSyncSubscriptions() { syncSubscriptionsFromGmail(); }
                     @Override public void onRefreshGmail() { refreshGmailStatus(); }
                     @Override public void onSignOut() { confirmSignOut(); }

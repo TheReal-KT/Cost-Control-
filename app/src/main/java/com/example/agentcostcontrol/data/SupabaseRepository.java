@@ -130,6 +130,12 @@ public final class SupabaseRepository implements ChatHistoryRepository {
         return redirectUrl;
     }
 
+    public boolean disconnectGmail() throws ApiException {
+        SessionSnapshot snapshot = requireSessionSnapshot();
+        JSONObject response = backendObject("DELETE", "/integrations/gmail", null, snapshot);
+        return requiredBoolean(response, "connected");
+    }
+
     SubscriptionSyncResult syncSubscriptionsFromGmail() throws ApiException {
         return syncSubscriptionsFromGmail(null);
     }

@@ -140,6 +140,7 @@ public final class BrandUiTest {
                 @Override public void onEditBudget(com.example.agentcostcontrol.model.Budget budget) { }
                 @Override public void onLoadMoreBudgets() { }
                 @Override public void onConnectGmail() { actions.add("connect"); }
+                @Override public void onDisconnectGmail() { actions.add("disconnect"); }
                 @Override public void onSyncSubscriptions() { actions.add("sync"); }
                 @Override public void onRefreshGmail() { actions.add("refresh"); }
                 @Override public void onSignOut() { }
@@ -147,16 +148,19 @@ public final class BrandUiTest {
             View disconnectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
                     new ProfileScreen.GmailState(true, true, false, false, false, null), profileActions);
             assertNotNull(findText(disconnectedProfile, "Connections"));
-            findText(disconnectedProfile, "Connect Gmail").performClick();
+            assertNotNull(findText(disconnectedProfile, "Gmail"));
+            assertFalse(findText(disconnectedProfile, "Sync").isEnabled());
+            findText(disconnectedProfile, "Connect").performClick();
             assertEquals(Collections.singletonList("connect"), actions);
 
             View connectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
                     new ProfileScreen.GmailState(true, true, true, false, false, null), profileActions);
-            View connectedStatus = findText(connectedProfile, "Gmail connected");
+            View connectedStatus = findText(connectedProfile, "Disconnect");
             assertNotNull(connectedStatus);
-            assertFalse(connectedStatus.isEnabled());
-            findText(connectedProfile, "Sync subscriptions").performClick();
-            assertEquals(Arrays.asList("connect", "sync"), actions);
+            assertTrue(connectedStatus.isEnabled());
+            connectedStatus.performClick();
+            findText(connectedProfile, "Sync").performClick();
+            assertEquals(Arrays.asList("connect", "disconnect", "sync"), actions);
 
             View services = ServicesScreen.create(context, Collections.emptyList(), "", "All", false,
                     new ServicesScreen.Actions() {

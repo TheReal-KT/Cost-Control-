@@ -37,7 +37,7 @@ The endpoint validates the signed-in access token, resolves the application prof
 
 Provide small read tools for subscription summaries, upcoming reminders and budget comparisons. Tools use ordinary deterministic domain calculations, including decimal money and separate currency totals. The model explains their results; it must not invent conversions, historical trends, usage measurements or savings certainty. Return source references from the actual tool results and validate them before displaying record links.
 
-MVP scope is **read-only Q&A**. When an answer suggests changing a record, link to its existing edit/review screen. This is quicker and preserves the current mutation contracts. Conversation-driven writes are a later feature, requiring the confirmation flow below.
+Ordinary Q&A remains read-only. A direct request to search Gmail and add one named subscription is now handled by a separate constrained importer, as described in [ADR 0006](../adr/0006-gmail-subscription-discovery.md). It does not let the model select actions or receive email content. Other conversation-driven writes remain future work and require the confirmation flow below.
 
 ## Proposed conversation contract
 
