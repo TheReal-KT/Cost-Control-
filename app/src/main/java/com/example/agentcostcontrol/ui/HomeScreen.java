@@ -40,7 +40,8 @@ public final class HomeScreen {
 
     public static View create(Context context, List<Subscription> subscriptions, List<Budget> budgets,
                               List<Reminder> reminders, Map<String, BigDecimal> monthlySpend,
-                              int activeCount, boolean totalsComplete, Actions actions) {
+                              int activeCount, boolean totalsComplete, boolean showGmailSetup,
+                              Actions actions) {
         LinearLayout page = Ui.page(context);
         page.addView(Ui.text(context, "Monthly spend", 15,
                 Ui.color(context, R.color.text_secondary), false));
@@ -69,17 +70,19 @@ public final class HomeScreen {
         addQuickAction(context, quickActions, "Services", R.drawable.ic_nav_services, actions::onOpenServices);
         page.addView(quickActions, margin(context, 0, 26, 0, 26));
 
-        LinearLayout gmailContent = Ui.column(context);
-        gmailContent.setPadding(Ui.dp(context, 16), Ui.dp(context, 14),
-                Ui.dp(context, 16), Ui.dp(context, 14));
-        gmailContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
-        gmailContent.addView(Ui.secondary(context,
-                "Connect Gmail in Profile to sync subscriptions or ask the assistant to find one."),
-                margin(context, 0, 6, 0, 10));
-        MaterialButton gmailButton = Ui.button(context, "Set up Gmail connection", false);
-        gmailButton.setOnClickListener(view -> actions.onOpenGmailConnection());
-        gmailContent.addView(gmailButton);
-        page.addView(Ui.card(context, gmailContent), margin(context, 0, 0, 0, 24));
+        if (showGmailSetup) {
+            LinearLayout gmailContent = Ui.column(context);
+            gmailContent.setPadding(Ui.dp(context, 16), Ui.dp(context, 14),
+                    Ui.dp(context, 16), Ui.dp(context, 14));
+            gmailContent.addView(Ui.section(context, "Find subscriptions from Gmail"));
+            gmailContent.addView(Ui.secondary(context,
+                    "Connect Gmail in Profile to sync subscriptions or ask the assistant to find one."),
+                    margin(context, 0, 6, 0, 10));
+            MaterialButton gmailButton = Ui.button(context, "Set up Gmail connection", false);
+            gmailButton.setOnClickListener(view -> actions.onOpenGmailConnection());
+            gmailContent.addView(gmailButton);
+            page.addView(Ui.card(context, gmailContent), margin(context, 0, 0, 0, 24));
+        }
 
         LinearLayout servicesHeading = Ui.row(context);
         servicesHeading.addView(Ui.section(context, context.getString(R.string.home_services)),

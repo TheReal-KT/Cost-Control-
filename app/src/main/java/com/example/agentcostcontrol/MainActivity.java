@@ -311,6 +311,8 @@ public class MainActivity extends AppCompatActivity {
         if (subscriptionsRefreshPending && routes.isEmpty()) {
             subscriptionsRefreshPending = false;
             renderCurrentRoute();
+        } else if (rootScreen == RootScreen.HOME && routes.isEmpty()) {
+            renderCurrentRoute();
         } else if (rootScreen == RootScreen.PROFILE && routes.isEmpty()) {
             refreshGmailStatus();
         }
@@ -956,7 +958,8 @@ public class MainActivity extends AppCompatActivity {
                     uncertainListChecked = true;
                 }
                 renderPage(result);
-                if (requestedRoot == RootScreen.PROFILE && routes.isEmpty()) refreshGmailStatus();
+                if ((requestedRoot == RootScreen.HOME || requestedRoot == RootScreen.PROFILE)
+                        && routes.isEmpty()) refreshGmailStatus();
             });
         });
     }
@@ -1043,11 +1046,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshGmailStatus() {
-        if (!activityResumed || session == null || authMode != null || rootScreen != RootScreen.PROFILE
+        if (!activityResumed || session == null || authMode != null
+                || (rootScreen != RootScreen.HOME && rootScreen != RootScreen.PROFILE)
                 || !routes.isEmpty() || gmailStatusRequestInFlight || gmailActionInFlight) return;
         gmailStatusRequestInFlight = true;
         int request = ++gmailStatusGeneration;
         int navigation = navigationGeneration;
+        int load = loadGeneration;
         String authUserId = session.getAuthUserId();
         dataWorker.execute(() -> {
             GmailConnection result = null;
@@ -1077,7 +1082,13 @@ public class MainActivity extends AppCompatActivity {
                     gmailConnected = resultConnection.isConnected();
                     gmailStatusError = null;
                 }
-                if (isCurrentGmailView(navigation, authUserId)) renderGmailIntegrationState();
+                if (isCurrentGmailView(navigation, authUserId)) {
+                    renderGmailIntegrationState();
+                } else if (activityResumed && load == loadGeneration && sameView(navigation, authUserId)
+                        && rootScreen == RootScreen.HOME && routes.isEmpty()) {
+                    saveCurrentScrollPosition();
+                    renderPage(currentData);
+                }
             });
         });
     }
@@ -1420,7 +1431,7 @@ public class MainActivity extends AppCompatActivity {
                 FinancialSummary summary = FinancialSummaryCalculator.calculate(data.subscriptions);
                 return HomeScreen.create(this, data.subscriptions, data.budgets, data.reminders,
                         summary.getMonthlySpendByCurrency(), summary.getActiveSubscriptionCount(),
-                        data.subscriptionsComplete,
+                        data.subscriptionsComplete, gmailStatusLoaded && !gmailConnected,
                         new HomeScreen.Actions() {
                             @Override public void onAddService() { openSubscriptionForm(null); }
                             @Override public void onAddReminder() { openReminderForm(null, null); }
