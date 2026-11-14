@@ -1,6 +1,6 @@
 # AI tab and LangGraph integration proposal
 
-Date: 6 October 2026; implementation updates 12 and 23 October. The native composer streams Nemotron 3.5 Lightning free answers through the Python `/ai/chat` endpoint and two LangGraph nodes. The endpoint verifies Supabase identity, reads owned account records with the caller's token, calculates deterministic facts and sends those facts plus the actual question to Nemotron. Empty accounts never receive fictional fixtures. Caller-bound correlation IDs, strict output bounds and cancellation remain enforced. Android connects locally over loopback HTTPS and ADB forwarding; no public deployment is required. Native history saves directly to account-scoped Supabase tables; it is not model memory. Gmail connections and source links remain proposed. See [real-account ADR](../adr/0005-real-account-ai-chat.md), [model availability ADR](../adr/0007-chat-model-availability.md), [history ADR](../adr/0004-native-chat-history.md) and [backend instructions](../../backend/README.md). The sections below describe the broader intended integration; the current implementation is narrower.
+Date: 6 October 2026; implementation updates through 14 November. The native composer streams Nemotron 3.5 Lightning free answers through the Python `/ai/chat` endpoint. For ordinary account questions the endpoint verifies Supabase identity, reads owned records with the caller's token, calculates deterministic facts and sends those facts plus the question to Nemotron. Gmail requests use the restricted tool path described below. Empty accounts never receive fictional fixtures. Caller-bound correlation IDs, strict output bounds and cancellation remain enforced. Android connects locally over loopback HTTPS and ADB forwarding; no public deployment is required. Native history saves directly to account-scoped Supabase tables; it is not model memory. Tappable source links remain proposed. See [real-account ADR](../adr/0005-real-account-ai-chat.md), [model availability ADR](../adr/0007-chat-model-availability.md), [history ADR](../adr/0004-native-chat-history.md) and [backend instructions](../../backend/README.md). The sections below describe the broader intended integration; the current implementation is narrower.
 
 ## Confirmed product decisions
 
@@ -12,7 +12,7 @@ Chat uses saved account data. Suggested prompts: “What renews next?”, “Exp
 
 ## Endpoint verified through Exa
 
-OpenRouter lists `nvidia/nemotron-3.5-lightning:free`. The backend fixes this model, disables fallback, sets `tool_choice: none` and exposes no model tools or action executor. Validate any generated structured values before later use or persistence. A paid model must not be substituted silently. [Model catalog](https://openrouter.ai/nvidia/nemotron-3.5-lightning:free)
+OpenRouter lists `nvidia/nemotron-3.5-lightning:free`. The backend fixes this model and disables fallback. Ordinary explanations use `tool_choice: none`; Gmail-related requests offer only the two validated application tools described below. A paid model must not be substituted silently. [Model catalog](https://openrouter.ai/nvidia/nemotron-3.5-lightning:free)
 
 Changing models does not establish private-data suitability. The user explicitly requested real account data for the local demonstration; the implemented data flow is documented in the backend instructions and [ADR 0005](../adr/0005-real-account-ai-chat.md). This does not establish zero retention or training exclusion. Review provider terms and account controls before distributing the app. Gmail/email records remain outside this change. [OpenRouter data guidance](https://openrouter.ai/docs/guides/privacy/logging)
 
@@ -37,7 +37,7 @@ The endpoint validates the signed-in access token, resolves the application prof
 
 Provide small read tools for subscription summaries, upcoming reminders and budget comparisons. Tools use ordinary deterministic domain calculations, including decimal money and separate currency totals. The model explains their results; it must not invent conversions, historical trends, usage measurements or savings certainty. Return source references from the actual tool results and validate them before displaying record links.
 
-MVP scope is **read-only Q&A**. When an answer suggests changing a record, link to its existing edit/review screen. This is quicker and preserves the current mutation contracts. Conversation-driven writes are a later feature, requiring the confirmation flow below.
+Ordinary Q&A remains read-only. For Gmail-related requests, the model can propose a connection check or a subscription search. A separate constrained importer validates the chosen service and the user's direct request before saving, as described in [ADR 0006](../adr/0006-gmail-subscription-discovery.md). The model does not receive email content or connection results. Other conversation-driven writes remain future work and require the confirmation flow below.
 
 ## Proposed conversation contract
 

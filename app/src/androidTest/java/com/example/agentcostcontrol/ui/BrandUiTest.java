@@ -72,7 +72,7 @@ public final class BrandUiTest {
             List<Subscription> services = Arrays.asList(service(1, "Netflix", "199.00"),
                     service(2, "ChatGPT Plus", "399.00"), service(3, "Spotify", "69.99"));
             View home = HomeScreen.create(context, services, Collections.emptyList(), Collections.emptyList(),
-                    Collections.singletonMap("ZAR", new BigDecimal("667.99")), 3, true, actions);
+                    Collections.singletonMap("ZAR", new BigDecimal("667.99")), 3, true, true, actions);
             TextView populatedAmount = (TextView) findText(home, "R 667.99");
             assertNotNull(populatedAmount);
             findDescription(home, "Add service").performClick();
@@ -82,15 +82,24 @@ public final class BrandUiTest {
             assertNotNull(netflix);
             ((View) netflix.getParent().getParent()).performClick();
             assertEquals(Arrays.asList("add-service", "add-reminder", "services", "service:1"), opened);
+            assertNotNull(findText(home, "Find subscriptions from Gmail"));
+            findText(home, "Set up Gmail connection").performClick();
+            assertEquals("gmail", opened.get(opened.size() - 1));
             capture(context, home, "home-branded", 390, 760);
+
+            View connectedHome = HomeScreen.create(context, services, Collections.emptyList(),
+                    Collections.emptyList(), Collections.singletonMap("ZAR", new BigDecimal("667.99")),
+                    3, true, false, actions);
+            assertNull(findText(connectedHome, "Find subscriptions from Gmail"));
+            assertNull(findText(connectedHome, "Set up Gmail connection"));
 
             Context largeText = themedContext(1.3f);
             capture(largeText, HomeScreen.create(largeText, Collections.singletonList(
                     service(4, "Independent design tools subscription", "120.00")), Collections.emptyList(),
                     Collections.emptyList(), Collections.singletonMap("ZAR", new BigDecimal("120.00")),
-                    1, false, actions), "home-small-large-text", 320, 640);
+                    1, false, true, actions), "home-small-large-text", 320, 640);
             View emptyHome = HomeScreen.create(context, Collections.emptyList(), Collections.emptyList(),
-                    Collections.emptyList(), Collections.emptyMap(), 0, true, actions);
+                    Collections.emptyList(), Collections.emptyMap(), 0, true, true, actions);
             capture(context, emptyHome, "home-empty", 390, 760);
             assertNotNull(findText(emptyHome, "Monthly spend"));
             TextView zeroAmount = (TextView) findText(emptyHome, "0.00");
@@ -140,6 +149,7 @@ public final class BrandUiTest {
                 @Override public void onEditBudget(com.example.agentcostcontrol.model.Budget budget) { }
                 @Override public void onLoadMoreBudgets() { }
                 @Override public void onConnectGmail() { actions.add("connect"); }
+                @Override public void onDisconnectGmail() { actions.add("disconnect"); }
                 @Override public void onSyncSubscriptions() { actions.add("sync"); }
                 @Override public void onRefreshGmail() { actions.add("refresh"); }
                 @Override public void onSignOut() { }
@@ -147,16 +157,19 @@ public final class BrandUiTest {
             View disconnectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
                     new ProfileScreen.GmailState(true, true, false, false, false, null), profileActions);
             assertNotNull(findText(disconnectedProfile, "Connections"));
-            findText(disconnectedProfile, "Connect Gmail").performClick();
+            assertNotNull(findText(disconnectedProfile, "Gmail"));
+            assertFalse(findText(disconnectedProfile, "Sync").isEnabled());
+            findText(disconnectedProfile, "Connect").performClick();
             assertEquals(Collections.singletonList("connect"), actions);
 
             View connectedProfile = ProfileScreen.create(context, profile, Collections.emptyList(), false,
                     new ProfileScreen.GmailState(true, true, true, false, false, null), profileActions);
-            View connectedStatus = findText(connectedProfile, "Gmail connected");
+            View connectedStatus = findText(connectedProfile, "Disconnect");
             assertNotNull(connectedStatus);
-            assertFalse(connectedStatus.isEnabled());
-            findText(connectedProfile, "Sync subscriptions").performClick();
-            assertEquals(Arrays.asList("connect", "sync"), actions);
+            assertTrue(connectedStatus.isEnabled());
+            connectedStatus.performClick();
+            findText(connectedProfile, "Sync").performClick();
+            assertEquals(Arrays.asList("connect", "disconnect", "sync"), actions);
 
             View services = ServicesScreen.create(context, Collections.emptyList(), "", "All", false,
                     new ServicesScreen.Actions() {

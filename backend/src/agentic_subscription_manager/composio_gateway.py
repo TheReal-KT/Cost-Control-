@@ -7,6 +7,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -15,8 +16,8 @@ from .adapters import RemoteFailure
 
 logger = logging.getLogger("agentcostcontrol.integrations")
 
-MAX_EMAILS_PER_SYNC = 50
-MAX_PAGES_PER_SYNC = 2
+MAX_EMAILS_PER_PAGE = 10
+MAX_PAGES_PER_SYNC = 10
 MAX_TOOL_RESPONSE_BYTES = 1_000_000
 TOOLKIT = "gmail"
 FETCH_TOOL = "GMAIL_FETCH_EMAILS"
@@ -25,6 +26,10 @@ SYNC_SDK_TIMEOUT = 18
 STATUS_TIMEOUT = 14
 CONNECT_TIMEOUT = 13
 SYNC_TIMEOUT = 55
+
+
+class _ResponseTooLarge(ValueError):
+    """The provider returned a page larger than the configured safety limit."""
 
 
 def _value(obj: object, key: str, default: object = None) -> object:
@@ -46,7 +51,7 @@ def _plain(value: object, depth: int = 0, budget: list[int] | None = None) -> ob
             name = str(key)
             budget[0] -= len(name.encode("utf-8"))
             if budget[0] < 0:
-                raise ValueError("Composio response exceeded its size limit")
+                raise _ResponseTooLarge("Composio response exceeded its size limit")
             result[name] = _plain(item, depth + 1, budget)
         return result
     if isinstance(value, list):
@@ -56,7 +61,7 @@ def _plain(value: object, depth: int = 0, budget: list[int] | None = None) -> ob
     if isinstance(value, str):
         budget[0] -= len(value.encode("utf-8"))
         if budget[0] < 0:
-            raise ValueError("Composio response exceeded its size limit")
+            raise _ResponseTooLarge("Composio response exceeded its size limit")
         return value
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
@@ -70,7 +75,7 @@ def _response_mapping(value: object) -> dict:
         raise ValueError("Composio returned an invalid response")
     encoded = json.dumps(plain, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(encoded) > MAX_TOOL_RESPONSE_BYTES:
-        raise ValueError("Composio response exceeded its size limit")
+        raise _ResponseTooLarge("Composio response exceeded its size limit")
     return plain
 
 
@@ -80,7 +85,7 @@ def _email_page(value: object) -> tuple[list[dict], str | None]:
         if "messages" in response:
             messages = response.get("messages")
             token = response.get("nextPageToken", response.get("next_page_token"))
-            if not isinstance(messages, list) or len(messages) > MAX_EMAILS_PER_SYNC:
+            if not isinstance(messages, list) or len(messages) > MAX_EMAILS_PER_PAGE:
                 raise ValueError("Composio returned an invalid email page")
             if any(not isinstance(message, dict) for message in messages):
                 raise ValueError("Composio returned an invalid email")
@@ -140,6 +145,10 @@ class ComposioGmail:
                     else self._client_factory(timeout, self._api_key)
                 )
             return self._clients[key]
+
+    def warm_up(self) -> None:
+        """Load the SDK before the first timed connection check."""
+        self._get_client(STATUS_SDK_TIMEOUT)
 
     @staticmethod
     def _check_active(cancelled: threading.Event, deadline: float) -> None:
@@ -221,9 +230,61 @@ class ComposioGmail:
             if not keep_for_authorization:
                 self._delete_session(session, "connect")
 
-    def _fetch(
+    def _disconnect(
         self, owner: UUID, cancelled: threading.Event, deadline: float, sdk_timeout: int
+    ) -> bool:
+        session = self._session(owner, cancelled, deadline, sdk_timeout)
+        try:
+            if not self._connected(session, cancelled, deadline):
+                return False
+            self._check_active(cancelled, deadline)
+            options = {
+                "user_ids": [str(owner)],
+                "toolkit_slugs": [TOOLKIT],
+                "statuses": ["ACTIVE"],
+                "account_type": "PRIVATE",
+                "limit": 2,
+            }
+            if self._gmail_auth_config_id:
+                options["auth_config_ids"] = [self._gmail_auth_config_id]
+            state = self._get_client(sdk_timeout).connected_accounts.list(**options)
+            items = _value(state, "items")
+            if not isinstance(items, (list, tuple)):
+                raise ValueError("Composio returned an invalid connection state")
+            if len(items) != 1 or _value(state, "next_cursor"):
+                raise RemoteFailure(409, "Cannot identify a single Gmail connection")
+            account = items[0]
+            if _value(_value(account, "toolkit"), "slug") != TOOLKIT or _value(
+                account, "user_id"
+            ) != str(owner):
+                raise RemoteFailure(403, "Cannot disconnect this Gmail account")
+            account_id = _value(account, "id")
+            if (
+                not isinstance(account_id, str)
+                or not re.fullmatch(r"ca_[A-Za-z0-9_-]{1,100}", account_id)
+                or _value(account, "status") != "ACTIVE"
+            ):
+                raise ValueError("Composio returned an invalid connected account")
+            self._check_active(cancelled, deadline)
+            response = self._get_client(sdk_timeout).connected_accounts.delete(
+                account_id, revoke_on_delete=True
+            )
+            if _value(response, "success") is not True:
+                raise RemoteFailure(503, "Gmail disconnection could not be confirmed")
+            return self._connected(session, cancelled, deadline)
+        finally:
+            self._delete_session(session, "disconnect")
+
+    def _fetch(
+        self,
+        owner: UUID,
+        cancelled: threading.Event,
+        deadline: float,
+        sdk_timeout: int,
+        service: str | None = None,
     ) -> tuple[list[dict], bool]:
+        if service is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 &.+-]{0,49}", service):
+            raise ValueError("Invalid service name")
         session = self._session(owner, cancelled, deadline, sdk_timeout)
         try:
             if not self._connected(session, cancelled, deadline):
@@ -231,39 +292,55 @@ class ComposioGmail:
             self._check_active(cancelled, deadline)
             messages: list[dict] = []
             next_token: str | None = None
+            page_size = MAX_EMAILS_PER_PAGE
             for _ in range(MAX_PAGES_PER_SYNC):
-                self._check_active(cancelled, deadline)
-                arguments: dict[str, object] = {
-                    "query": (
-                        "newer_than:90d {subscription renewal recurring membership receipt invoice "
-                        "billing payment}"
-                    ),
-                    "max_results": MAX_EMAILS_PER_SYNC,
-                    "include_payload": True,
-                    "include_spam_trash": False,
-                }
-                if next_token:
-                    arguments["page_token"] = next_token
-                result = session.execute(FETCH_TOOL, arguments=arguments)
-                result_type = _value(result, "result_type")
-                log_id = _value(result, "log_id")
-                safe_log_id = (
-                    log_id
-                    if isinstance(log_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", log_id)
-                    else "unknown"
-                )
-                data = _value(result, "data")
-                tool_success = _value(data, "successful")
-                if (
-                    result_type != "completed"
-                    or (tool_success is not None and not isinstance(tool_success, bool))
-                    or tool_success is False
-                ):
-                    logger.warning("gmail tool_failure log_id=%s", safe_log_id)
-                    raise RemoteFailure(502, "Gmail email search failed")
-                logger.info("gmail tool_success log_id=%s", safe_log_id)
-                self._check_active(cancelled, deadline)
-                page, next_token = _email_page(data)
+                while True:
+                    self._check_active(cancelled, deadline)
+                    query = "newer_than:90d "
+                    if service is not None:
+                        query += f'"{service}" '
+                    query += (
+                        "{subscription renewal recurring membership receipt "
+                        "invoice billing payment}"
+                    )
+                    arguments: dict[str, object] = {
+                        "query": query,
+                        "max_results": page_size,
+                        "verbose": True,
+                        "include_payload": False,
+                        "include_spam_trash": False,
+                    }
+                    if next_token:
+                        arguments["page_token"] = next_token
+                    result = session.execute(FETCH_TOOL, arguments=arguments)
+                    result_type = _value(result, "result_type")
+                    log_id = _value(result, "log_id")
+                    safe_log_id = (
+                        log_id
+                        if isinstance(log_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", log_id)
+                        else "unknown"
+                    )
+                    data = _value(result, "data")
+                    tool_success = _value(data, "successful")
+                    if (
+                        result_type != "completed"
+                        or (tool_success is not None and not isinstance(tool_success, bool))
+                        or tool_success is False
+                    ):
+                        logger.warning("gmail tool_failure log_id=%s", safe_log_id)
+                        raise RemoteFailure(502, "Gmail email search failed")
+                    logger.info("gmail tool_success log_id=%s", safe_log_id)
+                    self._check_active(cancelled, deadline)
+                    try:
+                        page, next_token = _email_page(data)
+                    except _ResponseTooLarge:
+                        if page_size == 1:
+                            raise
+                        page_size = max(1, page_size // 2)
+                        continue
+                    if len(page) > page_size:
+                        raise ValueError("Composio returned too many emails")
+                    break
                 messages.extend(page)
                 if not next_token or not page:
                     break
@@ -326,10 +403,20 @@ class ComposioGmail:
     @staticmethod
     async def _join_worker(worker: asyncio.Task[Any]) -> None:
         """Wait for a bounded SDK request to stop before releasing this operation."""
-        try:
-            await asyncio.shield(worker)
-        except (Exception, asyncio.CancelledError):
-            return
+        interrupted = False
+        while True:
+            try:
+                await asyncio.shield(worker)
+                break
+            except asyncio.CancelledError:
+                if worker.cancelled():
+                    raise
+                # An outer deadline may cancel again while the SDK call is stopping.
+                interrupted = True
+            except Exception:
+                break  # The request is already ending due to timeout or cancellation.
+        if interrupted:
+            raise asyncio.CancelledError
 
     async def is_connected(self, owner: UUID) -> bool:
         return await self._run(
@@ -349,10 +436,21 @@ class ComposioGmail:
             operation_timeout=CONNECT_TIMEOUT,
         )
 
-    async def fetch_recent_messages(self, owner: UUID) -> tuple[list[dict], bool]:
+    async def disconnect(self, owner: UUID) -> bool:
+        return await self._run(
+            "disconnect",
+            self._disconnect,
+            owner,
+            sdk_timeout=STATUS_SDK_TIMEOUT,
+            operation_timeout=CONNECT_TIMEOUT,
+        )
+
+    async def fetch_recent_messages(
+        self, owner: UUID, service: str | None = None
+    ) -> tuple[list[dict], bool]:
         return await self._run(
             "message_search",
-            self._fetch,
+            self._fetch if service is None else partial(self._fetch, service=service),
             owner,
             sdk_timeout=SYNC_SDK_TIMEOUT,
             operation_timeout=SYNC_TIMEOUT,

@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static androidx.test.espresso.Espresso.closeSoftKeyboard;
 import static androidx.test.espresso.Espresso.onView;
@@ -189,6 +190,46 @@ public final class SidebarNavigationTest {
         }
     }
 
+    @Test public void homeShowsGmailSetupOnlyAfterAConfirmedDisconnection() throws Exception {
+        ReadOnlyAccount account = new ReadOnlyAccount();
+        try (ActivityScenario<MainActivity> scenario = launchProfileAccount(account)) {
+            int previousReads = account.gmailStatusReads.get();
+            selectDestination("Home");
+            waitForHomeGmail(scenario, account, previousReads, true, false);
+
+            account.gmailConnected = false;
+            previousReads = account.gmailStatusReads.get();
+            scenario.moveToState(Lifecycle.State.STARTED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            waitForHomeGmail(scenario, account, previousReads, true, true);
+
+            account.gmailConnected = true;
+            previousReads = account.gmailStatusReads.get();
+            scenario.moveToState(Lifecycle.State.STARTED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            waitForHomeGmail(scenario, account, previousReads, true, false);
+
+            account.gmailConnected = false;
+            previousReads = account.gmailStatusReads.get();
+            scenario.moveToState(Lifecycle.State.STARTED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            waitForHomeGmail(scenario, account, previousReads, true, true);
+
+            account.gmailStatusFails = true;
+            previousReads = account.gmailStatusReads.get();
+            scenario.moveToState(Lifecycle.State.STARTED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            waitForHomeGmail(scenario, account, previousReads, false, false);
+        }
+    }
+
+    @Test public void homeHidesGmailSetupForAnAlreadyConnectedAccountOnSignIn() throws Exception {
+        ReadOnlyAccount account = new ReadOnlyAccount();
+        try (ActivityScenario<MainActivity> scenario = launchAccount(account)) {
+            waitForHomeGmail(scenario, account, 0, true, false);
+        }
+    }
+
     @Test public void shortScreensKeepHistoryReachableBelowAScrollableMenu() throws Exception {
         try (ActivityScenario<MainActivity> scenario = launchAccount(new ReadOnlyAccount())) {
             scenario.onActivity(activity -> activity.getWindow().setLayout(
@@ -302,9 +343,37 @@ public final class SidebarNavigationTest {
                     "Profile", title.getText().toString());
             ViewGroup container = activity.findViewById(R.id.screen_container);
             assertTrue("The screen should render content instead of remaining blank",
-                    container.getChildCount() > 0 && containsText(container, "Gmail connected")
-                            && containsText(container, "Sync subscriptions"));
+                    container.getChildCount() > 0 && containsText(container, "Gmail")
+                            && containsText(container, "Connected") && containsText(container, "Disconnect")
+                            && containsText(container, "Sync"));
         }));
+    }
+
+    private static void waitForHomeGmail(ActivityScenario<MainActivity> scenario, ReadOnlyAccount account,
+                                         int previousReads, boolean statusLoaded, boolean showSetup) {
+        waitFor(() -> {
+            assertTrue("Home should refresh the Gmail connection status",
+                    account.gmailStatusReads.get() > previousReads);
+            scenario.onActivity(activity -> {
+                TextView title = activity.findViewById(R.id.screen_title);
+                assertEquals("Home", title.getText().toString());
+                ViewGroup container = activity.findViewById(R.id.screen_container);
+                assertTrue("Home content should be visible", containsText(container, "Monthly spend"));
+                assertFalse("Gmail status is still loading", booleanField(activity, "gmailStatusRequestInFlight"));
+                assertEquals(statusLoaded, booleanField(activity, "gmailStatusLoaded"));
+                assertEquals(showSetup, containsText(container, "Set up Gmail connection"));
+            });
+        });
+    }
+
+    private static boolean booleanField(Object target, String name) {
+        try {
+            Field field = target.getClass().getDeclaredField(name);
+            field.setAccessible(true);
+            return field.getBoolean(target);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("Could not read the activity state", error);
+        }
     }
 
     private static boolean containsText(View view, String expected) {
@@ -383,6 +452,9 @@ public final class SidebarNavigationTest {
     private static final class ReadOnlyAccount {
         private static final String USER_ID = "11111111-1111-4111-8111-111111111111";
         final List<Integer> historyOffsets = Collections.synchronizedList(new ArrayList<>());
+        final AtomicInteger gmailStatusReads = new AtomicInteger();
+        volatile boolean gmailConnected = true;
+        volatile boolean gmailStatusFails;
         final SupabaseRepository repository;
 
         ReadOnlyAccount() {
@@ -397,19 +469,23 @@ public final class SidebarNavigationTest {
             repository = new SupabaseRepository("https://sidebar.example.invalid", "sb_publishable_test",
                     (method, url, headers, body) -> {
                         assertEquals("Navigation must only read account data", "GET", method);
+                        if ("/integrations/gmail".equals(android.net.Uri.parse(url).getPath())) {
+                            gmailStatusReads.incrementAndGet();
+                            if (gmailStatusFails) return new HttpTransport.Response(503, "{}");
+                        }
                         try {
                             return new HttpTransport.Response(200, response(url));
                         } catch (org.json.JSONException error) {
                             throw new AssertionError("Invalid navigation fixture", error);
                         }
-                    }, persistence, Clock.systemUTC());
+                    }, persistence, Clock.systemUTC(), "https://backend.example.invalid/ai/chat");
         }
 
         private String response(String url) throws org.json.JSONException {
             android.net.Uri uri = android.net.Uri.parse(url);
             String path = uri.getPath();
             if ("/integrations/gmail".equals(path)) {
-                return new JSONObject().put("configured", true).put("connected", true).toString();
+                return new JSONObject().put("configured", true).put("connected", gmailConnected).toString();
             }
             if ("/auth/v1/user".equals(path)) {
                 return new JSONObject().put("id", USER_ID).put("email", "sidebar@example.invalid").toString();

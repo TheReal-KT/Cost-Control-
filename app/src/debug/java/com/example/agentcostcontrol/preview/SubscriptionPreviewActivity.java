@@ -103,7 +103,7 @@ public final class SubscriptionPreviewActivity extends AppCompatActivity {
         List<Budget> budgets = Collections.singletonList(new Budget(1, 1,
                 new BigDecimal("2200.00"), "ZAR", month.getMonthValue(), month.getYear()));
         show("Home preview", HomeScreen.create(this, subscriptions, budgets, Collections.emptyList(),
-                summary.getMonthlySpendByCurrency(), summary.getActiveSubscriptionCount(), true,
+                summary.getMonthlySpendByCurrency(), summary.getActiveSubscriptionCount(), true, true,
                 new HomeScreen.Actions() {
                     @Override public void onAddService() { explainReadOnly(); }
                     @Override public void onAddReminder() { explainReadOnly(); }

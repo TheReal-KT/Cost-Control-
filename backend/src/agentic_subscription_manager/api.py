@@ -21,8 +21,10 @@ from .adapters import OpenRouterExplanation, RemoteFailure, SupabaseIdentity
 from .composio_gateway import ComposioGmail
 from .contracts import ChatReply, ChatRequest
 from .evidence import AccountEvidence, AnalysisTask, select_task
+from .gmail_chat import allows_import, allows_search, denies_gmail_access, may_need_gmail
+from .gmail_planner import GmailPlanner
 from .security import ConversationIds, Settings
-from .subscription_discovery import discover_subscriptions
+from .subscription_discovery import discover_subscriptions, targeted_message_count
 from .subscription_imports import SupabaseReceiptImports
 from .workflow import build_graph
 
@@ -36,6 +38,7 @@ logger.propagate = False
 
 INTEGRATION_STATUS_DEADLINE = 20
 SUBSCRIPTION_SYNC_DEADLINE = 75
+GMAIL_CHAT_DEADLINE = 110
 RECEIPT_IMPORT_TIMEOUT = 8
 
 
@@ -78,6 +81,7 @@ class IntegrationHeadersAndLogs:
 
     _OPERATIONS = {
         ("GET", "/integrations/gmail"): "gmail_status",
+        ("DELETE", "/integrations/gmail"): "gmail_disconnect",
         ("POST", "/integrations/gmail/connect"): "gmail_connect",
         ("POST", "/integrations/subscriptions/sync"): "subscription_sync",
     }
@@ -197,11 +201,8 @@ class IntegrationBudget:
                 del self.by_owner[owner]
 
 
-# Run the AI graph until the client disconnects.
-async def run_until_disconnect(
-    request: Request, graph, task, prompt: str, account: AccountEvidence
-):
-    """Stop local graph/HTTP work on disconnect; remote provider cancellation is best effort."""
+async def run_awaitable_until_disconnect(request: Request, awaitable):
+    """Stop local work on disconnect; a remote commit may already have completed."""
 
     async def disconnected() -> None:
         # The request body is already parsed. Await the ASGI disconnect event without polling.
@@ -209,9 +210,7 @@ async def run_until_disconnect(
             if (await request.receive())["type"] == "http.disconnect":
                 return
 
-    run = asyncio.create_task(
-        graph.ainvoke({"task": task, "prompt": prompt, "account": account}, {"recursion_limit": 5})
-    )
+    run = asyncio.create_task(awaitable)
     monitor = asyncio.create_task(disconnected())
     try:
         done, _ = await asyncio.wait({run, monitor}, return_when=asyncio.FIRST_COMPLETED)
@@ -222,6 +221,15 @@ async def run_until_disconnect(
         run.cancel()
         monitor.cancel()
         await asyncio.gather(run, monitor, return_exceptions=True)
+
+
+async def run_until_disconnect(
+    request: Request, graph, task, prompt: str, account: AccountEvidence
+):
+    return await run_awaitable_until_disconnect(
+        request,
+        graph.ainvoke({"task": task, "prompt": prompt, "account": account}, {"recursion_limit": 5}),
+    )
 
 
 async def graph_deltas(
@@ -291,8 +299,14 @@ def create_app(
                 config.composio_api_key,
                 config.composio_gmail_auth_config_id,
             )
+            if config.composio_configured and composio_client_factory is None:
+                try:
+                    await asyncio.to_thread(app.state.gmail.warm_up)
+                except Exception as error:
+                    logger.warning("gmail sdk_initialization_failed type=%s", type(error).__name__)
             app.state.conversations = ConversationIds(config.conversation_secret)
             app.state.graph = build_graph(OpenRouterExplanation(client, config.provider_key))
+            app.state.gmail_planner = GmailPlanner(client, config.provider_key)
             app.state.budget = RequestBudget()
             app.state.integration_budget = IntegrationBudget()
             try:
@@ -374,59 +388,90 @@ def create_app(
         except RemoteFailure as error:
             return integration_error(error)
 
+    @app.delete("/integrations/gmail")
+    async def gmail_disconnect(request: Request):
+        try:
+            async with asyncio.timeout(INTEGRATION_STATUS_DEADLINE):
+                _, owner = await verify_account_request(request)
+                if not app.state.settings.composio_configured:
+                    raise RemoteFailure(503, "Gmail integration is not configured")
+                async with app.state.integration_budget.admit(owner):
+                    connected = await app.state.gmail.disconnect(owner)
+                return {"connected": connected}
+        except TimeoutError:
+            return integration_error(RemoteFailure(504, "Gmail request timed out"))
+        except RemoteFailure as error:
+            return integration_error(error)
+
+    async def import_gmail_receipts(
+        token: str, owner: UUID, deadline: float, service: str | None = None, *, save: bool = True
+    ):
+        if not app.state.settings.composio_configured:
+            raise RemoteFailure(503, "Gmail integration is not configured")
+        async with app.state.integration_budget.admit(owner):
+            if service is None:
+                messages, has_more = await app.state.gmail.fetch_recent_messages(owner)
+            else:
+                messages, has_more = await app.state.gmail.fetch_recent_messages(
+                    owner, service=service
+                )
+        scanned = len(messages)
+        try:
+            receipts = discover_subscriptions(messages, requested_service=service)
+            matched = targeted_message_count(messages, service) if service is not None else 0
+        except ValueError as error:
+            raise RemoteFailure(502, "Gmail email data is invalid") from error
+        if receipts and save:
+            # Leave enough time to observe the atomic database transaction's result.
+            if time.monotonic() + RECEIPT_IMPORT_TIMEOUT + 0.25 >= deadline:
+                raise RemoteFailure(504, "Gmail request timed out")
+            imported = await app.state.receipt_imports.import_receipts(token, receipts)
+            imported_count = imported.imported
+            skipped_count = scanned - imported_count
+            message = (
+                f"Imported {imported_count} subscription(s); "
+                f"{skipped_count} scanned email(s) were skipped as existing/duplicate "
+                "receipts or because they lacked clear subscription evidence."
+            )
+        elif receipts:
+            imported_count = 0
+            skipped_count = scanned
+            message = "Matching receipts found; no services were saved."
+        else:
+            imported_count = 0
+            skipped_count = scanned
+            message = (
+                f"No eligible subscription was found; {scanned} scanned email(s) "
+                "lacked clear recurring-charge and future-renewal evidence."
+            )
+        if has_more:
+            message += " More matching emails remain beyond this scan."
+        return {
+            "imported": imported_count,
+            "skipped": skipped_count,
+            "scanned": scanned,
+            "has_more": has_more,
+            "message": message,
+            "eligible": len(receipts),
+            "matched": matched,
+        }
+
     @app.post("/integrations/subscriptions/sync")
     async def sync_subscriptions(request: Request):
         deadline = time.monotonic() + SUBSCRIPTION_SYNC_DEADLINE
         try:
             async with asyncio.timeout_at(deadline):
                 token, owner = await verify_account_request(request)
-                if not app.state.settings.composio_configured:
-                    raise RemoteFailure(503, "Gmail integration is not configured")
-                async with app.state.integration_budget.admit(owner):
-                    messages, has_more = await app.state.gmail.fetch_recent_messages(owner)
-                scanned = len(messages)
-                try:
-                    receipts = discover_subscriptions(messages)
-                except ValueError as error:
-                    raise RemoteFailure(502, "Gmail email data is invalid") from error
-                if receipts:
-                    # The RPC has an 8-second client timeout. Do not start it when
-                    # the overall request budget cannot leave time to observe its
-                    # atomic result before returning to the Android client.
-                    if time.monotonic() + RECEIPT_IMPORT_TIMEOUT + 0.25 >= deadline:
-                        raise RemoteFailure(504, "Gmail request timed out")
-                    imported = await app.state.receipt_imports.import_receipts(token, receipts)
-                    imported_count = imported.imported
-                    skipped_count = scanned - imported_count
-                    message = (
-                        f"Imported {imported_count} subscription(s); "
-                        f"{skipped_count} scanned email(s) were skipped as existing/duplicate "
-                        "receipts or because they lacked clear subscription evidence."
-                    )
-                else:
-                    imported_count = 0
-                    skipped_count = scanned
-                    message = (
-                        f"No eligible subscription was found; {scanned} scanned email(s) "
-                        "lacked clear recurring-charge and future-renewal evidence."
-                    )
-                if has_more:
-                    message += " More matching emails remain beyond this scan."
-                return {
-                    "imported": imported_count,
-                    "skipped": skipped_count,
-                    "scanned": scanned,
-                    "has_more": has_more,
-                    "message": message,
-                }
+                result = await import_gmail_receipts(token, owner, deadline)
+                result.pop("eligible")
+                result.pop("matched")
+                return result
         except TimeoutError:
             return integration_error(RemoteFailure(504, "Gmail request timed out"))
         except RemoteFailure as error:
             return integration_error(error)
 
-    async def prepare_chat(
-        payload: ChatRequest, token: str
-    ) -> tuple[AnalysisTask | None, str, AccountEvidence]:
+    async def prepare_conversation(payload: ChatRequest, token: str) -> tuple[UUID, str]:
         owner = await app.state.identity.verify(token)
         conversations = app.state.conversations
         if payload.conversation_id is not None:
@@ -435,10 +480,81 @@ def create_app(
             conversation = payload.conversation_id
         else:
             conversation = conversations.issue(owner)
-        task = select_task(payload.prompt)
         app.state.budget.reserve_call(owner)
+        return owner, conversation
+
+    async def prepare_chat(
+        payload: ChatRequest, token: str
+    ) -> tuple[AnalysisTask | None, str, AccountEvidence]:
+        owner, conversation = await prepare_conversation(payload, token)
+        task = select_task(payload.prompt)
         account = await app.state.account_reads.load(owner, token)
         return task, conversation, account
+
+    async def chat_gmail_import(
+        token: str, owner: UUID, service: str, deadline: float, *, save: bool
+    ) -> str:
+        try:
+            result = await import_gmail_receipts(token, owner, deadline, service, save=save)
+        except RemoteFailure as error:
+            if error.status == 409:
+                return "Connect Gmail in Profile first, then ask me again."
+            if error.status in (502, 503, 504):
+                return (
+                    "I couldn't confirm the Gmail import. Check Services before trying again."
+                    if save
+                    else "I couldn't search Gmail right now. Please try again."
+                )
+            raise
+        if result["eligible"] and not save:
+            answer = f"I found a qualifying {service} receipt. Ask me to add it to Services."
+        elif result["imported"]:
+            answer = f"Added {service} to Services from a qualifying Gmail receipt."
+        elif result["eligible"]:
+            answer = f"{service} is already saved, or this receipt was imported before."
+        elif result["matched"]:
+            answer = (
+                f"I found Gmail messages mentioning {service}, but couldn't verify a current "
+                "recurring charge and renewal date. Please check the billing details and add "
+                "the service manually."
+            )
+        else:
+            answer = (
+                f"I couldn't find a qualifying {service} subscription receipt in the "
+                "messages scanned. A receipt needs a clear recurring charge and future "
+                "renewal date; you can also add the service manually."
+            )
+        if result["has_more"]:
+            answer += " More matching emails may remain outside this scan."
+        return answer
+
+    async def answer_gmail_request(token: str, owner: UUID, prompt: str, deadline: float) -> str:
+        if denies_gmail_access(prompt):
+            return "I won't check Gmail or change your services."
+        action = await app.state.gmail_planner.select(prompt)
+        if action is None:
+            return (
+                "I can check whether Gmail is connected or search it for a named subscription. "
+                "Ask me to add that subscription if you want it saved to Services."
+            )
+        if action.name == "gmail_connection_status":
+            if not app.state.settings.composio_configured:
+                return "Gmail is not configured on this server."
+            async with app.state.integration_budget.admit(owner):
+                connected = await app.state.gmail.is_connected(owner)
+            return (
+                "Gmail is connected through Composio. The assistant currently checks Gmail only."
+                if connected
+                else "Gmail is not connected. Connect it in Profile."
+            )
+        service = action.service
+        if service is None:
+            raise RemoteFailure(502, "Invalid AI tool request")
+        if not allows_search(prompt, service):
+            return "Ask me to search Gmail for a named subscription when you want me to check it."
+        # A model-selected tool is a proposal, not permission to write.
+        save = action.save and allows_import(prompt, service)
+        return await chat_gmail_import(token, owner, service, deadline, save=save)
 
     @app.post("/ai/chat", response_model=ChatReply)
     async def chat(payload: ChatRequest, request: Request):
@@ -449,12 +565,22 @@ def create_app(
         status = 200
         try:
             token = require_token(request)
-            async with app.state.budget.admit(), asyncio.timeout(38):
-                task, conversation, account = await prepare_chat(payload, token)
-                result = await run_until_disconnect(
-                    request, app.state.graph, task, payload.prompt, account
-                )
-                return ChatReply(answer=result["answer"], conversation_id=conversation)
+            gmail_request = may_need_gmail(payload.prompt)
+            timeout = GMAIL_CHAT_DEADLINE if gmail_request else 38
+            deadline = time.monotonic() + timeout
+            async with app.state.budget.admit(), asyncio.timeout_at(deadline):
+                if gmail_request:
+                    owner, conversation = await prepare_conversation(payload, token)
+                    answer = await run_awaitable_until_disconnect(
+                        request, answer_gmail_request(token, owner, payload.prompt, deadline)
+                    )
+                else:
+                    task, conversation, account = await prepare_chat(payload, token)
+                    result = await run_until_disconnect(
+                        request, app.state.graph, task, payload.prompt, account
+                    )
+                    answer = result["answer"]
+                return ChatReply(answer=answer, conversation_id=conversation)
         except TimeoutError:
             status = 504
             return JSONResponse(
@@ -493,10 +619,16 @@ def create_app(
         started = time.monotonic()
         request_id = uuid4().hex
         status = 200
+        gmail_request = may_need_gmail(payload.prompt)
+        timeout = GMAIL_CHAT_DEADLINE if gmail_request else 38
+        deadline = started + timeout
         try:
             token = require_token(request)
-            async with app.state.budget.admit(), asyncio.timeout(38):
-                task, conversation, account = await prepare_chat(payload, token)
+            async with app.state.budget.admit(), asyncio.timeout_at(deadline):
+                if gmail_request:
+                    owner, conversation = await prepare_conversation(payload, token)
+                else:
+                    task, conversation, account = await prepare_chat(payload, token)
         except (RemoteFailure, TimeoutError) as error:
             status = error.status if isinstance(error, RemoteFailure) else 504
             detail = error.code if isinstance(error, RemoteFailure) else "AI request timed out"
@@ -518,14 +650,19 @@ def create_app(
             try:
                 async with (
                     app.state.budget.admit(),
-                    asyncio.timeout(max(0, 38 - (time.monotonic() - started))),
+                    asyncio.timeout_at(deadline),
                 ):
                     yield event("start", {"conversation_id": conversation})
-                    async with aclosing(
-                        graph_deltas(app.state.graph, task, payload.prompt, account)
-                    ) as parts:
-                        async for part in parts:
-                            yield event("delta", {"text": part["text"]})
+                    if gmail_request:
+                        yield event("delta", {"text": "Checking your request…\n\n"})
+                        answer = await answer_gmail_request(token, owner, payload.prompt, deadline)
+                        yield event("delta", {"text": answer})
+                    else:
+                        async with aclosing(
+                            graph_deltas(app.state.graph, task, payload.prompt, account)
+                        ) as parts:
+                            async for part in parts:
+                                yield event("delta", {"text": part["text"]})
                     yield event("done", {"conversation_id": conversation})
             except TimeoutError:
                 status = 504

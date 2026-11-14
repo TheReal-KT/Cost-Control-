@@ -5,6 +5,8 @@ import android.os.Bundle;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import com.example.agentcostcontrol.BuildConfig;
+import com.example.agentcostcontrol.chat.ChatClient;
 import com.example.agentcostcontrol.model.GmailConnection;
 import com.example.agentcostcontrol.model.Session;
 import com.example.agentcostcontrol.model.SubscriptionSyncResult;
@@ -21,6 +23,31 @@ import static org.junit.Assert.fail;
 /** Opt-in check of the real signed-in Gmail connection; sync requires a second explicit opt-in. */
 @RunWith(AndroidJUnit4.class)
 public final class LiveGmailConnectionTest {
+    @Test
+    public void checksAssistantUsesRealGmailConnectionStatus() throws Exception {
+        Bundle arguments = InstrumentationRegistry.getArguments();
+        Assume.assumeTrue("true".equals(arguments.getString("verifyGmailAgent")));
+        SupabaseRepository repository = new SupabaseRepository(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        Session session = repository.restoreSession();
+        if (session == null) {
+            report("NEEDS_SIGN_IN", null);
+            Assume.assumeTrue("Sign in before live Gmail verification", false);
+            return;
+        }
+        GmailConnection connection = repository.getGmailConnection();
+        Assume.assumeTrue("Gmail must be configured", connection.isConfigured());
+        StringBuilder streamed = new StringBuilder();
+        ChatClient.Reply reply = new ChatClient().askStream(BuildConfig.AI_ENDPOINT_URL,
+                session.getAccessToken(), "Is my Gmail connected through Composio?", null,
+                streamed::append);
+        assertEquals(streamed.toString().trim(), reply.answer);
+        assertTrue("The assistant must report the actual Gmail connection status",
+                reply.answer.contains(connection.isConnected()
+                        ? "Gmail is connected through Composio" : "Gmail is not connected"));
+        report("AGENT_STATUS_VERIFIED", null);
+    }
+
     @Test
     public void createsSafeConnectLinkWhenExplicitlyRequested() throws Exception {
         Bundle arguments = InstrumentationRegistry.getArguments();

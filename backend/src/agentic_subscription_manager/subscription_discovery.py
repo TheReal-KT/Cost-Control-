@@ -380,7 +380,9 @@ def _price(text: str) -> tuple[str, str] | None:
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
-def _extract(message: object, now: datetime) -> tuple[dict, datetime] | None:
+def _extract(
+    message: object, now: datetime, service_override: str | None = None
+) -> tuple[dict, datetime] | None:
     if not isinstance(message, Mapping):
         return None
     message_id = message.get("id", message.get("messageId", message.get("message_id")))
@@ -404,12 +406,19 @@ def _extract(message: object, now: datetime) -> tuple[dict, datetime] | None:
         return None
     subject = _as_text(message.get("subject")) or headers.get("subject", "")
     sender = _message_sender(message, headers)
-    service = _service_name(sender)
+    service = service_override or _service_name(sender)
     if not service:
         return None
     text = f"{subject}\n{body}"
     if _INACTIVE_OR_UNPAID.search(text) or _OFFER_LANGUAGE.search(text):
         return None
+    if service_override and _is_app_store_sender(sender):
+        # Store receipts can contain multiple products. Do not assign another
+        # item's charge to ChatGPT when the amount cannot be linked to it.
+        product = re.search(r"\bchatgpt\b", text, re.I)
+        prices = list(_PRICE.finditer(text))
+        if not product or len(prices) != 1 or abs(prices[0].start() - product.start()) > 120:
+            return None
     cycle_matches = bool(_MONTHLY.search(text)), bool(_YEARLY.search(text))
     if cycle_matches == (True, False):
         cycle = "MONTHLY"
@@ -441,7 +450,62 @@ def _extract(message: object, now: datetime) -> tuple[dict, datetime] | None:
     return receipt, received_at
 
 
-def discover_subscriptions(messages: list[object], now: datetime | None = None) -> list[dict]:
+def _is_app_store_sender(sender: str) -> bool:
+    _, address = parseaddr(sender)
+    domain = address.rpartition("@")[2].casefold().rstrip(".")
+    service = (_service_name(sender) or "").casefold()
+    apple = (domain == "apple.com" or domain.endswith(".apple.com")) and (
+        "apple" in service or service in {"app store", "itunes", "itunes store"}
+    )
+    google = (domain == "google.com" or domain.endswith(".google.com")) and service in {
+        "google play",
+        "google",
+    }
+    return apple or google
+
+
+def _targeted_service(message: Mapping, requested: str) -> str | None:
+    headers = _headers(message)
+    sender = _message_sender(message, headers)
+    service = _service_name(sender)
+    if not service:
+        return None
+    key = " ".join(requested.casefold().split())
+    service_key = " ".join(service.casefold().split())
+    if key not in {"chatgpt", "chatgpt plus"}:
+        return service if service_key == key else None
+    store_sender = _is_app_store_sender(sender)
+    if service_key not in {"openai", "chatgpt", "chatgpt plus"} and not store_sender:
+        return None
+    # OpenAI can bill several products. Require explicit ChatGPT evidence and an
+    # OpenAI or recognized payment-processor sender before mapping the merchant.
+    _, address = parseaddr(sender)
+    domain = address.rpartition("@")[2].casefold().rstrip(".")
+    trusted_sender = store_sender or any(
+        domain == suffix or domain.endswith(f".{suffix}")
+        for suffix in {"openai.com", "chatgpt.com", *_PROCESSOR_DOMAINS}
+    )
+    subject = _as_text(message.get("subject")) or headers.get("subject", "")
+    product_pattern = r"\bchatgpt\s+plus\b" if key == "chatgpt plus" else r"\bchatgpt\b"
+    if trusted_sender and re.search(product_pattern, f"{subject}\n{_message_text(message)}", re.I):
+        return "ChatGPT Plus" if key == "chatgpt plus" else "ChatGPT"
+    return None
+
+
+def targeted_message_count(messages: list[object], requested: str) -> int:
+    """Count product-related messages, including ones with insufficient receipt evidence."""
+    if not isinstance(messages, list) or len(messages) > MAX_RECEIPTS:
+        raise ValueError("Invalid Gmail message page")
+    return sum(
+        bool(_targeted_service(message, requested))
+        for message in messages
+        if isinstance(message, Mapping)
+    )
+
+
+def discover_subscriptions(
+    messages: list[object], now: datetime | None = None, *, requested_service: str | None = None
+) -> list[dict]:
     """Return one freshest, validated receipt per service from a bounded message page."""
     if not isinstance(messages, list) or len(messages) > MAX_RECEIPTS:
         raise ValueError("Invalid Gmail message page")
@@ -449,11 +513,18 @@ def discover_subscriptions(messages: list[object], now: datetime | None = None) 
     freshest: dict[tuple[str, str, str], tuple[datetime, dict]] = {}
     inactive_at: dict[str, datetime] = {}
     for message in messages:
+        service_override = None
+        if requested_service is not None:
+            if not isinstance(message, Mapping):
+                continue
+            service_override = _targeted_service(message, requested_service)
+            if not service_override:
+                continue
         if isinstance(message, Mapping):
             headers = _headers(message)
             received_at = _message_date(message, headers)
             sender = _message_sender(message, headers)
-            service = _service_name(sender)
+            service = service_override or _service_name(sender)
             body = _message_text(message)
             subject = _as_text(message.get("subject")) or headers.get("subject", "")
             if (
@@ -464,7 +535,7 @@ def discover_subscriptions(messages: list[object], now: datetime | None = None) 
             ):
                 key = " ".join(service.casefold().split())
                 inactive_at[key] = max(received_at, inactive_at.get(key, received_at))
-        result = _extract(message, current)
+        result = _extract(message, current, service_override)
         if result is None:
             continue
         receipt, received_at = result
