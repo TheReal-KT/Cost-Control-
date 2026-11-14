@@ -21,9 +21,10 @@ from .adapters import OpenRouterExplanation, RemoteFailure, SupabaseIdentity
 from .composio_gateway import ComposioGmail
 from .contracts import ChatReply, ChatRequest
 from .evidence import AccountEvidence, AnalysisTask, select_task
-from .gmail_chat import requested_service
+from .gmail_chat import allows_import, allows_search, denies_gmail_access, may_need_gmail
+from .gmail_planner import GmailPlanner
 from .security import ConversationIds, Settings
-from .subscription_discovery import discover_subscriptions
+from .subscription_discovery import discover_subscriptions, targeted_message_count
 from .subscription_imports import SupabaseReceiptImports
 from .workflow import build_graph
 
@@ -37,6 +38,7 @@ logger.propagate = False
 
 INTEGRATION_STATUS_DEADLINE = 20
 SUBSCRIPTION_SYNC_DEADLINE = 75
+GMAIL_CHAT_DEADLINE = 110
 RECEIPT_IMPORT_TIMEOUT = 8
 
 
@@ -297,8 +299,14 @@ def create_app(
                 config.composio_api_key,
                 config.composio_gmail_auth_config_id,
             )
+            if config.composio_configured and composio_client_factory is None:
+                try:
+                    await asyncio.to_thread(app.state.gmail.warm_up)
+                except Exception as error:
+                    logger.warning("gmail sdk_initialization_failed type=%s", type(error).__name__)
             app.state.conversations = ConversationIds(config.conversation_secret)
             app.state.graph = build_graph(OpenRouterExplanation(client, config.provider_key))
+            app.state.gmail_planner = GmailPlanner(client, config.provider_key)
             app.state.budget = RequestBudget()
             app.state.integration_budget = IntegrationBudget()
             try:
@@ -396,7 +404,7 @@ def create_app(
             return integration_error(error)
 
     async def import_gmail_receipts(
-        token: str, owner: UUID, deadline: float, service: str | None = None
+        token: str, owner: UUID, deadline: float, service: str | None = None, *, save: bool = True
     ):
         if not app.state.settings.composio_configured:
             raise RemoteFailure(503, "Gmail integration is not configured")
@@ -409,15 +417,11 @@ def create_app(
                 )
         scanned = len(messages)
         try:
-            receipts = discover_subscriptions(messages)
+            receipts = discover_subscriptions(messages, requested_service=service)
+            matched = targeted_message_count(messages, service) if service is not None else 0
         except ValueError as error:
             raise RemoteFailure(502, "Gmail email data is invalid") from error
-        if service is not None:
-            key = " ".join(service.casefold().split())
-            receipts = [
-                r for r in receipts if " ".join(r["service_name"].casefold().split()) == key
-            ]
-        if receipts:
+        if receipts and save:
             # Leave enough time to observe the atomic database transaction's result.
             if time.monotonic() + RECEIPT_IMPORT_TIMEOUT + 0.25 >= deadline:
                 raise RemoteFailure(504, "Gmail request timed out")
@@ -429,6 +433,10 @@ def create_app(
                 f"{skipped_count} scanned email(s) were skipped as existing/duplicate "
                 "receipts or because they lacked clear subscription evidence."
             )
+        elif receipts:
+            imported_count = 0
+            skipped_count = scanned
+            message = "Matching receipts found; no services were saved."
         else:
             imported_count = 0
             skipped_count = scanned
@@ -445,6 +453,7 @@ def create_app(
             "has_more": has_more,
             "message": message,
             "eligible": len(receipts),
+            "matched": matched,
         }
 
     @app.post("/integrations/subscriptions/sync")
@@ -455,6 +464,7 @@ def create_app(
                 token, owner = await verify_account_request(request)
                 result = await import_gmail_receipts(token, owner, deadline)
                 result.pop("eligible")
+                result.pop("matched")
                 return result
         except TimeoutError:
             return integration_error(RemoteFailure(504, "Gmail request timed out"))
@@ -481,19 +491,33 @@ def create_app(
         account = await app.state.account_reads.load(owner, token)
         return task, conversation, account
 
-    async def chat_gmail_import(token: str, owner: UUID, service: str, deadline: float) -> str:
+    async def chat_gmail_import(
+        token: str, owner: UUID, service: str, deadline: float, *, save: bool
+    ) -> str:
         try:
-            result = await import_gmail_receipts(token, owner, deadline, service)
+            result = await import_gmail_receipts(token, owner, deadline, service, save=save)
         except RemoteFailure as error:
             if error.status == 409:
-                return "Connect Gmail in Profile first, then ask me to find and add the service."
+                return "Connect Gmail in Profile first, then ask me again."
             if error.status in (502, 503, 504):
-                return "I couldn't confirm the Gmail import. Check Services before trying again."
+                return (
+                    "I couldn't confirm the Gmail import. Check Services before trying again."
+                    if save
+                    else "I couldn't search Gmail right now. Please try again."
+                )
             raise
-        if result["imported"]:
+        if result["eligible"] and not save:
+            answer = f"I found a qualifying {service} receipt. Ask me to add it to Services."
+        elif result["imported"]:
             answer = f"Added {service} to Services from a qualifying Gmail receipt."
         elif result["eligible"]:
             answer = f"{service} is already saved, or this receipt was imported before."
+        elif result["matched"]:
+            answer = (
+                f"I found Gmail messages mentioning {service}, but couldn't verify a current "
+                "recurring charge and renewal date. Please check the billing details and add "
+                "the service manually."
+            )
         else:
             answer = (
                 f"I couldn't find a qualifying {service} subscription receipt in the "
@@ -504,6 +528,34 @@ def create_app(
             answer += " More matching emails may remain outside this scan."
         return answer
 
+    async def answer_gmail_request(token: str, owner: UUID, prompt: str, deadline: float) -> str:
+        if denies_gmail_access(prompt):
+            return "I won't check Gmail or change your services."
+        action = await app.state.gmail_planner.select(prompt)
+        if action is None:
+            return (
+                "I can check whether Gmail is connected or search it for a named subscription. "
+                "Ask me to add that subscription if you want it saved to Services."
+            )
+        if action.name == "gmail_connection_status":
+            if not app.state.settings.composio_configured:
+                return "Gmail is not configured on this server."
+            async with app.state.integration_budget.admit(owner):
+                connected = await app.state.gmail.is_connected(owner)
+            return (
+                "Gmail is connected through Composio. The assistant currently checks Gmail only."
+                if connected
+                else "Gmail is not connected. Connect it in Profile."
+            )
+        service = action.service
+        if service is None:
+            raise RemoteFailure(502, "Invalid AI tool request")
+        if not allows_search(prompt, service):
+            return "Ask me to search Gmail for a named subscription when you want me to check it."
+        # A model-selected tool is a proposal, not permission to write.
+        save = action.save and allows_import(prompt, service)
+        return await chat_gmail_import(token, owner, service, deadline, save=save)
+
     @app.post("/ai/chat", response_model=ChatReply)
     async def chat(payload: ChatRequest, request: Request):
         if payload.stream:
@@ -513,14 +565,14 @@ def create_app(
         status = 200
         try:
             token = require_token(request)
-            service = requested_service(payload.prompt)
-            timeout = SUBSCRIPTION_SYNC_DEADLINE if service else 38
+            gmail_request = may_need_gmail(payload.prompt)
+            timeout = GMAIL_CHAT_DEADLINE if gmail_request else 38
             deadline = time.monotonic() + timeout
             async with app.state.budget.admit(), asyncio.timeout_at(deadline):
-                if service:
+                if gmail_request:
                     owner, conversation = await prepare_conversation(payload, token)
                     answer = await run_awaitable_until_disconnect(
-                        request, chat_gmail_import(token, owner, service, deadline)
+                        request, answer_gmail_request(token, owner, payload.prompt, deadline)
                     )
                 else:
                     task, conversation, account = await prepare_chat(payload, token)
@@ -567,13 +619,13 @@ def create_app(
         started = time.monotonic()
         request_id = uuid4().hex
         status = 200
-        service = requested_service(payload.prompt)
-        timeout = SUBSCRIPTION_SYNC_DEADLINE if service else 38
+        gmail_request = may_need_gmail(payload.prompt)
+        timeout = GMAIL_CHAT_DEADLINE if gmail_request else 38
         deadline = started + timeout
         try:
             token = require_token(request)
             async with app.state.budget.admit(), asyncio.timeout_at(deadline):
-                if service:
+                if gmail_request:
                     owner, conversation = await prepare_conversation(payload, token)
                 else:
                     task, conversation, account = await prepare_chat(payload, token)
@@ -601,9 +653,9 @@ def create_app(
                     asyncio.timeout_at(deadline),
                 ):
                     yield event("start", {"conversation_id": conversation})
-                    if service:
-                        yield event("delta", {"text": f"Searching Gmail for {service}…\n\n"})
-                        answer = await chat_gmail_import(token, owner, service, deadline)
+                    if gmail_request:
+                        yield event("delta", {"text": "Checking your request…\n\n"})
+                        answer = await answer_gmail_request(token, owner, payload.prompt, deadline)
                         yield event("delta", {"text": answer})
                     else:
                         async with aclosing(

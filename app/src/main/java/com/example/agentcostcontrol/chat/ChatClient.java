@@ -63,7 +63,7 @@ public final class ChatClient {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Cancelled");
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(90_000);
+            connection.setReadTimeout(120_000);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json");
             connection.setRequestProperty("Accept", listener == null ? "application/json" : "text/event-stream");

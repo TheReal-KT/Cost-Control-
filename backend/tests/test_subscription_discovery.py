@@ -3,7 +3,10 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from agentic_subscription_manager.subscription_discovery import discover_subscriptions
+from agentic_subscription_manager.subscription_discovery import (
+    discover_subscriptions,
+    targeted_message_count,
+)
 
 NOW = datetime(2026, 10, 22, 10, 0, tzinfo=UTC)
 
@@ -22,6 +25,51 @@ def message(message_id="fresh-receipt", *, received_at=NOW, text=None, subject=N
 
 
 class SubscriptionDiscoveryContracts(unittest.TestCase):
+    def test_targeted_chatgpt_matches_openai_only_with_product_and_sender_evidence(self):
+        chatgpt = message("chatgpt")
+        chatgpt["from"] = "OpenAI <billing@openai.com>"
+        chatgpt["subject"] = "Your ChatGPT receipt"
+        api = message("api")
+        api["from"] = "OpenAI <billing@openai.com>"
+        api["subject"] = "Your API receipt"
+        impostor = message("impostor")
+        impostor["from"] = "OpenAI <billing@unrelated.example>"
+        impostor["subject"] = "Your ChatGPT receipt"
+        receipts = discover_subscriptions(
+            [chatgpt, api, impostor], NOW, requested_service="ChatGPT"
+        )
+        self.assertEqual(["chatgpt"], [receipt["source_id"] for receipt in receipts])
+        self.assertEqual("ChatGPT", receipts[0]["service_name"])
+
+    def test_targeted_chatgpt_cancellation_suppresses_an_older_openai_receipt(self):
+        receipt = message("older", received_at=NOW - timedelta(days=1))
+        receipt["from"] = "OpenAI <billing@openai.com>"
+        receipt["subject"] = "Your ChatGPT receipt"
+        cancelled = message("cancelled", text="Your ChatGPT subscription was cancelled.")
+        cancelled["from"] = "OpenAI <billing@openai.com>"
+        self.assertEqual(
+            [], discover_subscriptions([receipt, cancelled], NOW, requested_service="ChatGPT")
+        )
+
+    def test_targeted_chatgpt_can_use_an_unambiguous_apple_receipt(self):
+        receipt = message("apple")
+        receipt["from"] = "Apple <receipts@apple.com>"
+        receipt["subject"] = "Your ChatGPT subscription receipt"
+        receipt["textBody"] = receipt["textBody"].replace(
+            "monthly subscription", "monthly ChatGPT subscription"
+        )
+        found = discover_subscriptions([receipt], NOW, requested_service="ChatGPT")
+        self.assertEqual(["ChatGPT"], [item["service_name"] for item in found])
+        receipt["textBody"] += " Another item cost ZAR 50.00 on this receipt."
+        self.assertEqual([], discover_subscriptions([receipt], NOW, requested_service="ChatGPT"))
+
+    def test_chatgpt_mention_without_billing_details_is_not_imported(self):
+        notice = message("notice", text="Your ChatGPT subscription is available in the App Store.")
+        notice["from"] = "Apple <receipts@apple.com>"
+        notice["subject"] = "ChatGPT"
+        self.assertEqual(1, targeted_message_count([notice], "ChatGPT"))
+        self.assertEqual([], discover_subscriptions([notice], NOW, requested_service="ChatGPT"))
+
     def test_accepts_current_composio_fetch_emails_schema(self):
         renewal = (NOW.date() + timedelta(days=20)).isoformat()
         live_schema_message = {

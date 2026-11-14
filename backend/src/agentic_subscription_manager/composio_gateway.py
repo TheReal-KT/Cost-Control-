@@ -146,6 +146,10 @@ class ComposioGmail:
                 )
             return self._clients[key]
 
+    def warm_up(self) -> None:
+        """Load the SDK before the first timed connection check."""
+        self._get_client(STATUS_SDK_TIMEOUT)
+
     @staticmethod
     def _check_active(cancelled: threading.Event, deadline: float) -> None:
         if cancelled.is_set():
